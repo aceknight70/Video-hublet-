@@ -1,0 +1,10 @@
+{
+  "name": "Video Editor Hublet",
+  "description": "A standalone tool for staff to combine short marketing video clips into longer videos.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
