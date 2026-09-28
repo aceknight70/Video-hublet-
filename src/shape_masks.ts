@@ -115,3 +115,36 @@ export function getShapeCssClipPath(shape: ImageShape): string {
       return 'none';
   }
 }
+
+/**
+ * Renders text overlay onto a transparent canvas and exports as PNG Blob for FFmpeg
+ */
+export function renderTextOverlayBlob(text: string, _style?: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1080;
+    canvas.height = 360;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return reject(new Error('Canvas 2D context unavailable'));
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = 'bold 56px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Drop shadow
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 4;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Failed to generate text overlay blob'));
+    }, 'image/png');
+  });
+}
+

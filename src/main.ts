@@ -20,7 +20,8 @@ import {
   getNextShape,
   getShapeIcon,
   renderMaskedImageBlob,
-  getShapeCssClipPath
+  getShapeCssClipPath,
+  renderTextOverlayBlob
 } from './shape_masks';
 
 // --- CONFIG & CONSTANTS ---
@@ -389,6 +390,9 @@ async function handleImageUpload(e: Event) {
   const file = target.files[0];
   const url = URL.createObjectURL(file);
 
+  const totalDur = getTotalDuration();
+  const initDur = totalDur > 0 ? Math.min(4, Math.max(0.5, totalDur - currentGlobalTime)) : 4;
+
   const imgOverlay: OverlayClip = {
     id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     type: 'image',
@@ -396,7 +400,7 @@ async function handleImageUpload(e: Event) {
     content: url,
     shape: 'rectangle', // default
     startTime: currentGlobalTime,
-    duration: 4,
+    duration: Math.max(0.5, initDur),
     x: 25,
     y: 25,
     width: 50,
@@ -418,6 +422,9 @@ async function handlePipUpload(e: Event) {
   const url = URL.createObjectURL(file);
   const dur = await getVideoDuration(url);
 
+  const totalDur = getTotalDuration();
+  const initDur = totalDur > 0 ? Math.min(dur, Math.max(0.5, totalDur - currentGlobalTime)) : Math.min(dur, 10);
+
   const pipOverlay: OverlayClip = {
     id: `pip_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     type: 'image', // reuse overlay engine with video tag or specialized overlay
@@ -426,7 +433,7 @@ async function handlePipUpload(e: Event) {
     style: 'pip',
     shape: 'rectangle',
     startTime: currentGlobalTime,
-    duration: Math.min(dur, 10),
+    duration: Math.max(0.5, initDur),
     x: 60,
     y: 10,
     width: 35,
@@ -452,6 +459,61 @@ function getVideoDuration(url: string): Promise<number> {
 // --- TIMELINE CALCULATIONS & RENDERING ---
 function getTotalDuration() {
   return videoSequence.reduce((acc, clip) => acc + (clip.trimEnd - clip.trimStart), 0);
+}
+
+function getSnapPoints(excludeOverlayId?: string): number[] {
+  const points = new Set<number>();
+  points.add(0);
+  const total = getTotalDuration();
+  if (total > 0) points.add(total);
+  if (currentGlobalTime >= 0 && currentGlobalTime <= total) {
+    points.add(currentGlobalTime);
+  }
+
+  let accum = 0;
+  for (const clip of videoSequence) {
+    const dur = clip.trimEnd - clip.trimStart;
+    points.add(accum);
+    accum += dur;
+    points.add(accum);
+  }
+
+  for (const ov of overlays) {
+    if (ov.id === excludeOverlayId) continue;
+    points.add(ov.startTime);
+    points.add(ov.startTime + ov.duration);
+  }
+
+  return Array.from(points);
+}
+
+function snapTimeToPoints(proposedTime: number, duration: number, snapPoints: number[]): number {
+  const SNAP_THRESHOLD_SEC = 6 / PX_PER_SEC; // ~0.3s soft snap
+  let bestDiff = SNAP_THRESHOLD_SEC;
+  let snapped = proposedTime;
+  let hasSnapped = false;
+
+  for (const p of snapPoints) {
+    const diff = Math.abs(proposedTime - p);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      snapped = p;
+      hasSnapped = true;
+    }
+  }
+
+  if (!hasSnapped) {
+    for (const p of snapPoints) {
+      const targetStart = p - duration;
+      const diff = Math.abs(proposedTime - targetStart);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        snapped = targetStart;
+      }
+    }
+  }
+
+  return snapped;
 }
 
 function renderTimeline() {
@@ -555,76 +617,254 @@ function renderTimeline() {
     const isSelected = selectedItemId === overlay.id;
 
     const div = document.createElement('div');
-    div.className = `absolute h-full rounded text-[10px] px-1 font-medium flex items-center overflow-hidden cursor-pointer ${isSelected ? 'border border-white shadow-lg z-20' : 'border border-transparent'}`;
+    div.className = `absolute h-full rounded text-[10px] px-1 font-medium flex items-center overflow-visible cursor-grab touch-none select-none ${isSelected ? 'border border-white shadow-lg ring-1 ring-white/50 z-30' : 'border border-transparent hover:border-white/30 z-10'}`;
+    div.style.touchAction = 'none';
     div.style.width = `${width}px`;
     div.style.left = `${left}px`;
 
+    const innerContent = document.createElement('div');
+    innerContent.className = 'w-full h-full flex items-center overflow-hidden rounded pointer-events-none select-none';
+
     const contentSpan = document.createElement('span');
-    contentSpan.className = 'truncate select-none pointer-events-none w-full';
+    contentSpan.className = 'truncate select-none pointer-events-none w-full px-1';
 
     if (overlay.type === 'text') {
       div.classList.add('bg-blue-600/80', 'text-white');
       contentSpan.textContent = overlay.content || 'Text';
-      div.appendChild(contentSpan);
+      innerContent.appendChild(contentSpan);
+      div.appendChild(innerContent);
       elements.trackText.appendChild(div);
     } else if (overlay.type === 'image') {
       div.classList.add(overlay.style === 'pip' ? 'bg-purple-600/80' : 'bg-amber-600/80', 'text-white');
       contentSpan.textContent = overlay.style === 'pip' ? 'PiP Video' : `Image [${getShapeIcon(overlay.shape || 'rectangle')}]`;
-      div.appendChild(contentSpan);
+      innerContent.appendChild(contentSpan);
+      div.appendChild(innerContent);
       if (elements.trackImage) {
         elements.trackImage.appendChild(div);
       } else {
         elements.trackText.appendChild(div);
       }
     } else if (overlay.type === 'voiceover') {
-      div.classList.add('bg-red-600/80', 'text-white', 'z-10');
+      div.classList.add('bg-red-600/80', 'text-white');
       contentSpan.textContent = 'Voiceover';
-      div.appendChild(contentSpan);
+      innerContent.appendChild(contentSpan);
+      div.appendChild(innerContent);
       elements.trackAudio.appendChild(div);
     }
 
     div.addEventListener('click', (e) => {
       e.stopPropagation();
-      selectItem(overlay.id, 'overlay');
+      lastItemInteractionTime = Date.now();
     });
 
-    // Resize handles for overlays on timeline
+    // Pointer-based body dragging (moves block left and right along timeline)
+    div.addEventListener('pointerdown', (e: PointerEvent) => {
+      // If clicking resize handle, ignore body drag
+      if ((e.target as HTMLElement).closest('.overlay-resize-handle')) {
+        return;
+      }
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+      e.stopPropagation();
+      e.preventDefault();
+      lastItemInteractionTime = Date.now();
+
+      const dragStartX = e.clientX;
+      const origStartTime = overlay.startTime;
+      let hasMoved = false;
+
+      // Lock timeline horizontal scroll so phone gestures move the block without scrolling
+      elements.timelineScroll.style.overflowX = 'hidden';
+      elements.timelineScroll.style.touchAction = 'none';
+
+      // Floating live timestamp badge
+      let timeBadge: HTMLDivElement | null = null;
+
+      const onPointerMove = (ev: PointerEvent) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const deltaX = ev.clientX - dragStartX;
+
+        if (!hasMoved && Math.abs(deltaX) > 2) {
+          hasMoved = true;
+          div.classList.add('cursor-grabbing', 'opacity-90', 'ring-2', 'ring-white', 'shadow-2xl', 'z-50');
+
+          timeBadge = document.createElement('div');
+          timeBadge.className = 'absolute -top-6 left-1/2 -translate-x-1/2 bg-blue-600 text-white font-mono text-[9px] px-1.5 py-0.5 rounded shadow pointer-events-none whitespace-nowrap z-50 border border-white/20';
+          div.appendChild(timeBadge);
+        }
+
+        if (hasMoved) {
+          const deltaTime = deltaX / PX_PER_SEC;
+          let proposedStart = origStartTime + deltaTime;
+
+          // Soft snapping to clip boundaries, playhead, 0:00, video end
+          const snapPoints = getSnapPoints(overlay.id);
+          proposedStart = snapTimeToPoints(proposedStart, overlay.duration, snapPoints);
+
+          // Clamping: cannot go before 0:00 or past the end of the video
+          const maxStart = totalDur > 0 ? Math.max(0, totalDur - Math.min(totalDur, overlay.duration)) : 300;
+          proposedStart = Math.max(0, Math.min(maxStart, proposedStart));
+
+          overlay.startTime = proposedStart;
+          div.style.left = `${proposedStart * PX_PER_SEC}px`;
+
+          if (timeBadge) {
+            timeBadge.textContent = `${formatTime(proposedStart)} (${proposedStart.toFixed(1)}s)`;
+          }
+
+          // Live preview updates without rebuilding DOM
+          updatePlayheadAndPreview();
+        }
+      };
+
+      const onPointerUp = (ev: PointerEvent) => {
+        ev.stopPropagation();
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerUp);
+
+        elements.timelineScroll.style.overflowX = 'auto';
+        elements.timelineScroll.style.touchAction = '';
+        lastItemInteractionTime = Date.now();
+
+        div.classList.remove('cursor-grabbing', 'opacity-90', 'ring-2', 'ring-white', 'shadow-2xl', 'z-50');
+        if (timeBadge) {
+          timeBadge.remove();
+          timeBadge = null;
+        }
+
+        // Tapping or dragging selects item and triggers clean re-render
+        selectItem(overlay.id, 'overlay');
+      };
+
+      window.addEventListener('pointermove', onPointerMove, { passive: false });
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+    });
+
+    // Left and Right resize handles when selected (stretches or shortens)
     if (isSelected) {
-      const rightHandle = document.createElement('div');
-      rightHandle.className = 'absolute right-0 top-0 bottom-0 w-6 bg-black/30 cursor-ew-resize hover:bg-black/50 flex items-center justify-center touch-none z-20';
-      rightHandle.innerHTML = '<div class="w-1 h-3 bg-white rounded-full pointer-events-none shadow-sm"></div>';
+      // Left handle (stretches/shortens start time)
+      const leftHandle = document.createElement('div');
+      leftHandle.className = 'overlay-resize-handle absolute left-0 top-0 bottom-0 w-3.5 bg-black/50 hover:bg-black/70 cursor-ew-resize flex items-center justify-center touch-none z-30 select-none rounded-l';
+      leftHandle.innerHTML = '<div class="w-1 h-3 bg-white rounded-full pointer-events-none shadow-sm"></div>';
 
-      let isResizing = false;
-      let startX = 0;
-      let startWidth = 0;
-
-      rightHandle.addEventListener('pointerdown', (e) => {
+      leftHandle.addEventListener('pointerdown', (e: PointerEvent) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
         e.stopPropagation();
         e.preventDefault();
-        rightHandle.setPointerCapture(e.pointerId);
-        isResizing = true;
-        startX = e.clientX;
-        startWidth = overlay.duration * PX_PER_SEC;
+        lastItemInteractionTime = Date.now();
 
-        const onPointerMove = (ev: PointerEvent) => {
-          if (!isResizing) return;
-          const deltaX = ev.clientX - startX;
-          const newWidth = Math.max(20, startWidth + deltaX);
-          overlay.duration = newWidth / PX_PER_SEC;
-          div.style.width = `${newWidth}px`;
+        elements.timelineScroll.style.overflowX = 'hidden';
+        elements.timelineScroll.style.touchAction = 'none';
+
+        const leftStartX = e.clientX;
+        const leftOrigStart = overlay.startTime;
+        const leftOrigEnd = overlay.startTime + overlay.duration;
+
+        const onLeftMove = (ev: PointerEvent) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const deltaX = ev.clientX - leftStartX;
+          let proposedStart = leftOrigStart + (deltaX / PX_PER_SEC);
+
+          const snapPoints = getSnapPoints(overlay.id);
+          const SNAP_THRESHOLD_SEC = 6 / PX_PER_SEC;
+          for (const p of snapPoints) {
+            if (Math.abs(proposedStart - p) < SNAP_THRESHOLD_SEC) {
+              proposedStart = p;
+              break;
+            }
+          }
+
+          const maxStart = leftOrigEnd - 0.4;
+          proposedStart = Math.max(0, Math.min(maxStart, proposedStart));
+
+          const newDuration = leftOrigEnd - proposedStart;
+          overlay.startTime = proposedStart;
+          overlay.duration = newDuration;
+
+          div.style.left = `${proposedStart * PX_PER_SEC}px`;
+          div.style.width = `${newDuration * PX_PER_SEC}px`;
+
+          updatePlayheadAndPreview();
         };
 
-        const onPointerUp = (ev: PointerEvent) => {
-          isResizing = false;
-          try { rightHandle.releasePointerCapture(ev.pointerId); } catch {}
-          rightHandle.removeEventListener('pointermove', onPointerMove);
-          rightHandle.removeEventListener('pointerup', onPointerUp);
+        const onLeftUp = () => {
+          window.removeEventListener('pointermove', onLeftMove);
+          window.removeEventListener('pointerup', onLeftUp);
+          window.removeEventListener('pointercancel', onLeftUp);
+          elements.timelineScroll.style.overflowX = 'auto';
+          elements.timelineScroll.style.touchAction = '';
+          lastItemInteractionTime = Date.now();
           renderTimeline();
           updatePlayheadAndPreview();
         };
 
-        rightHandle.addEventListener('pointermove', onPointerMove);
-        rightHandle.addEventListener('pointerup', onPointerUp);
+        window.addEventListener('pointermove', onLeftMove, { passive: false });
+        window.addEventListener('pointerup', onLeftUp);
+        window.addEventListener('pointercancel', onLeftUp);
+      });
+
+      div.appendChild(leftHandle);
+
+      // Right handle (stretches/shortens duration)
+      const rightHandle = document.createElement('div');
+      rightHandle.className = 'overlay-resize-handle absolute right-0 top-0 bottom-0 w-3.5 bg-black/50 hover:bg-black/70 cursor-ew-resize flex items-center justify-center touch-none z-30 select-none rounded-r';
+      rightHandle.innerHTML = '<div class="w-1 h-3 bg-white rounded-full pointer-events-none shadow-sm"></div>';
+
+      rightHandle.addEventListener('pointerdown', (e: PointerEvent) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.stopPropagation();
+        e.preventDefault();
+        lastItemInteractionTime = Date.now();
+
+        elements.timelineScroll.style.overflowX = 'hidden';
+        elements.timelineScroll.style.touchAction = 'none';
+
+        const rightStartX = e.clientX;
+        const rightOrigDur = overlay.duration;
+
+        const onRightMove = (ev: PointerEvent) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const deltaX = ev.clientX - rightStartX;
+          let proposedDur = rightOrigDur + (deltaX / PX_PER_SEC);
+
+          const snapPoints = getSnapPoints(overlay.id);
+          const SNAP_THRESHOLD_SEC = 6 / PX_PER_SEC;
+          for (const p of snapPoints) {
+            const targetDur = p - overlay.startTime;
+            if (targetDur > 0.4 && Math.abs(proposedDur - targetDur) < SNAP_THRESHOLD_SEC) {
+              proposedDur = targetDur;
+              break;
+            }
+          }
+
+          const maxDur = totalDur > 0 ? Math.max(0.4, totalDur - overlay.startTime) : 3600;
+          proposedDur = Math.max(0.4, Math.min(maxDur, proposedDur));
+
+          overlay.duration = proposedDur;
+          div.style.width = `${proposedDur * PX_PER_SEC}px`;
+
+          updatePlayheadAndPreview();
+        };
+
+        const onRightUp = () => {
+          window.removeEventListener('pointermove', onRightMove);
+          window.removeEventListener('pointerup', onRightUp);
+          window.removeEventListener('pointercancel', onRightUp);
+          elements.timelineScroll.style.overflowX = 'auto';
+          elements.timelineScroll.style.touchAction = '';
+          lastItemInteractionTime = Date.now();
+          renderTimeline();
+          updatePlayheadAndPreview();
+        };
+
+        window.addEventListener('pointermove', onRightMove, { passive: false });
+        window.addEventListener('pointerup', onRightUp);
+        window.addEventListener('pointercancel', onRightUp);
       });
 
       div.appendChild(rightHandle);
@@ -634,7 +874,10 @@ function renderTimeline() {
   updatePlayheadAndPreview();
 }
 
+let lastItemInteractionTime = 0;
+
 function selectItem(id: string | null, type: 'video' | 'overlay' | null) {
+  lastItemInteractionTime = Date.now();
   selectedItemId = id;
   selectedItemType = type;
 
@@ -652,6 +895,7 @@ function selectItem(id: string | null, type: 'video' | 'overlay' | null) {
 
 // Clear selection on background click
 document.addEventListener('click', (e) => {
+  if (Date.now() - lastItemInteractionTime < 450) return;
   const target = e.target as HTMLElement;
   if (target.closest('#timeline-scroll') && !target.closest('#track-video > div') && !target.closest('#track-text > div') && !target.closest('#track-image > div') && !target.closest('#track-audio > div')) {
     selectItem(null, null);
@@ -1958,13 +2202,16 @@ function handleAddText() {
   const text = elements.textOverlayInput.value.trim();
   if (!text) return;
 
+  const totalDur = getTotalDuration();
+  const initDur = totalDur > 0 ? Math.min(3, Math.max(0.5, totalDur - currentGlobalTime)) : 3;
+
   const o: OverlayClip = {
     id: `txt_${Date.now()}`,
     type: 'text',
     content: text,
     style: textStyle,
     startTime: currentGlobalTime,
-    duration: 3,
+    duration: Math.max(0.5, initDur),
     x: 50,
     y: 50
   };
@@ -2266,6 +2513,71 @@ async function handleExport() {
           currentInputVideo = outWithImg;
         } catch (imgErr) {
           console.warn('Image overlay filter fallback:', imgErr);
+        }
+      }
+    }
+
+    // Handle Text Overlays (renders text at updated start time & duration)
+    const textOverlays = overlays.filter(o => o.type === 'text' && o.content);
+    if (textOverlays.length > 0) {
+      elements.exportStatusText.textContent = "Overlaying text...";
+      for (let i = 0; i < textOverlays.length; i++) {
+        const ov = textOverlays[i];
+        if (!ov.content) continue;
+
+        try {
+          const textBlob = await renderTextOverlayBlob(ov.content, ov.style);
+          const textFileName = `text_overlay_${i}.png`;
+          await ffmpeg.writeFile(textFileName, await fetchFile(textBlob));
+
+          const outWithText = `text_comp_${i}.mp4`;
+          const startSec = ov.startTime;
+          const endSec = ov.startTime + ov.duration;
+          const yPos = Math.max(0, Math.round((ov.y !== undefined ? ov.y : 50) * 19.2 - 180));
+
+          await ffmpeg.exec([
+            '-i', currentInputVideo,
+            '-i', textFileName,
+            '-filter_complex', `[0:v][1:v]overlay=0:${yPos}:enable='between(t,${startSec.toFixed(2)},${endSec.toFixed(2)})'[v]`,
+            '-map', '[v]',
+            '-map', '0:a?',
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-c:a', 'copy',
+            outWithText
+          ]);
+          currentInputVideo = outWithText;
+        } catch (textErr) {
+          console.warn('Text overlay filter fallback:', textErr);
+        }
+      }
+    }
+
+    // Handle Voiceover Overlays (mixes voiceovers at their respective start times)
+    const voOverlays = overlays.filter(o => o.type === 'voiceover' && o.file);
+    if (voOverlays.length > 0) {
+      elements.exportStatusText.textContent = "Mixing voiceovers...";
+      for (let i = 0; i < voOverlays.length; i++) {
+        const vo = voOverlays[i];
+        if (!vo.file) continue;
+        const voFileName = `vo_track_${i}.wav`;
+        try {
+          await ffmpeg.writeFile(voFileName, await fetchFile(vo.file));
+          const delayMs = Math.round(vo.startTime * 1000);
+          const outWithVo = `vo_comp_${i}.mp4`;
+          await ffmpeg.exec([
+            '-i', currentInputVideo,
+            '-i', voFileName,
+            '-filter_complex', `[1:a]adelay=${delayMs}|${delayMs},volume=1.0[delayed_vo];[0:a][delayed_vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+            '-map', '0:v',
+            '-map', '[aout]',
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            outWithVo
+          ]);
+          currentInputVideo = outWithVo;
+        } catch (voErr) {
+          console.warn('Voiceover mixing fallback:', voErr);
         }
       }
     }
