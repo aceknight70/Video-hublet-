@@ -12,6 +12,12 @@ import {
   uploadBeatToLibrary,
   fetchMasterAnalytics,
   recordProjectExport,
+  uploadExportToSupabase,
+  cleanupOldStaffExports,
+  cleanupOldStaffClips,
+  fetchRecentExports,
+  fetchExportStorageStats,
+  clearAllOldExports,
   VidhubBeatRow
 } from './supabase';
 import { getBuiltinTracks, BuiltinTrack } from './audio_synthesizer';
@@ -26,7 +32,7 @@ import {
 
 // --- CONFIG & CONSTANTS ---
 export const MASTER_PIN = '2026';
-const CONFIG = (window as any).HUBLET_CONFIG || { maxClips: 5, targetResolution: { w: 1080, h: 1920 }, fps: 30 };
+const CONFIG = (window as any).HUBLET_CONFIG || { maxClips: 5, targetResolution: { w: 720, h: 1280 }, fps: 30 };
 const PX_PER_SEC = 20; // Scale of timeline (pixels per second)
 
 export type TransitionType = 'fade' | 'crossfade' | 'white' | 'slide' | 'zoom' | 'none';
@@ -241,6 +247,22 @@ const elements = {
   modalExport: document.getElementById('modal-export') as HTMLDivElement,
   exportProgressBar: document.getElementById('export-progress-bar') as HTMLDivElement,
   exportStatusText: document.getElementById('export-status-text') as HTMLParagraphElement,
+  exportProgressView: document.getElementById('export-progress-view') as HTMLDivElement,
+  exportCompleteView: document.getElementById('export-complete-view') as HTMLDivElement,
+  exportPreviewVideo: document.getElementById('export-preview-video') as HTMLVideoElement,
+  exportCloudStatus: document.getElementById('export-cloud-status') as HTMLDivElement,
+  exportCloudStatusText: document.getElementById('export-cloud-status-text') as HTMLSpanElement,
+  exportLinkBox: document.getElementById('export-link-box') as HTMLDivElement,
+  exportLinkText: document.getElementById('export-link-text') as HTMLParagraphElement,
+  exportUploadError: document.getElementById('export-upload-error') as HTMLDivElement,
+  exportUploadErrorMsg: document.getElementById('export-upload-error-msg') as HTMLParagraphElement,
+  btnSaveToPhone: document.getElementById('btn-save-to-phone') as HTMLButtonElement,
+  savePhoneNotice: document.getElementById('save-phone-notice') as HTMLDivElement,
+  btnShareExport: document.getElementById('btn-share-export') as HTMLButtonElement,
+  shareNotice: document.getElementById('share-notice') as HTMLDivElement,
+  btnCopyExportLink: document.getElementById('btn-copy-export-link') as HTMLButtonElement,
+  copyLinkBtnText: document.getElementById('copy-link-btn-text') as HTMLSpanElement,
+  btnBackToEditing: document.getElementById('btn-back-to-editing') as HTMLButtonElement,
 };
 
 // --- INITIALIZATION ---
@@ -334,6 +356,9 @@ function checkAuth() {
   if (currentClientId && currentStaffId) {
     elements.loginOverlay.classList.add('hidden');
     renderTimeline();
+    // Keep storage small: clean up exports & clips older than 48 hours for this staff member
+    cleanupOldStaffExports(currentClientId, currentStaffId);
+    cleanupOldStaffClips(currentClientId, currentStaffId);
   } else {
     elements.loginOverlay.classList.remove('hidden');
   }
@@ -2164,8 +2189,158 @@ async function renderAdminDashboardTab() {
     html += `</div></div>`;
     elements.adminTabContent.innerHTML = html;
 
+  } else if (currentAdminTab === 'recent_exports') {
+    // 4. Recent Exports (Last 48 Hours)
+    elements.adminTabContent.innerHTML = '<div class="text-xs text-zinc-400 p-8 text-center">Loading recent exports from Supabase...</div>';
+    const recent = await fetchRecentExports();
+
+    let html = `
+      <div class="space-y-4">
+        <div class="flex justify-between items-center">
+          <div>
+            <h3 class="text-sm font-semibold text-white">Recent Exports (Last 48 Hours)</h3>
+            <p class="text-xs text-zinc-400">Marketing videos exported by staff ready for posting</p>
+          </div>
+          <span class="text-xs font-mono bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full border border-blue-500/20">${recent.length} exports</span>
+        </div>
+        <div class="space-y-2.5">
+    `;
+
+    if (recent.length === 0) {
+      html += `<div class="p-8 text-center text-xs text-zinc-500 bg-zinc-950 border border-zinc-800 rounded-xl">No exports recorded in the last 48 hours. When staff finish exports, they appear here with instant play and copy link buttons.</div>`;
+    } else {
+      recent.forEach((p: any) => {
+        const timeStr = p.exported_at ? new Date(p.exported_at).toLocaleString() : (p.created_at ? new Date(p.created_at).toLocaleString() : 'Recent');
+        const durStr = formatTime(p.total_duration_seconds || 0);
+        const url = p.exported_video_url || '';
+
+        html += `
+          <div class="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-white font-mono">${p.staff_id || 'staff'}</span>
+                <span class="text-[11px] bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded">${p.client_id || 'client'}</span>
+                <span class="text-[11px] text-zinc-400 font-mono">${durStr}</span>
+              </div>
+              <p class="text-[11px] text-zinc-500">${timeStr}</p>
+              ${url ? `<p class="text-[10px] font-mono text-zinc-500 truncate max-w-md">${url}</p>` : ''}
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              ${url ? `
+                <a href="${url}" target="_blank" rel="noopener noreferrer" class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 shadow-sm">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                  <span>Open</span>
+                </a>
+                <button class="btn-copy-recent-export text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1 cursor-pointer" data-url="${url}">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>Copy link</span>
+                </button>
+              ` : `
+                <span class="text-xs text-zinc-500">Local save only</span>
+              `}
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    html += `</div></div>`;
+    elements.adminTabContent.innerHTML = html;
+
+    // Attach copy button handlers
+    elements.adminTabContent.querySelectorAll('.btn-copy-recent-export').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const u = btn.getAttribute('data-url');
+        if (u) {
+          try {
+            await navigator.clipboard.writeText(u);
+            const orig = btn.innerHTML;
+            btn.innerHTML = '<span>Copied!</span>';
+            setTimeout(() => { btn.innerHTML = orig; }, 2000);
+          } catch {}
+        }
+      });
+    });
+
+  } else if (currentAdminTab === 'export_storage') {
+    // 5. Export Storage & Retention
+    elements.adminTabContent.innerHTML = '<div class="text-xs text-zinc-400 p-8 text-center">Scanning vidhub_exports storage bucket...</div>';
+    const stats = await fetchExportStorageStats();
+    const sizeMb = (stats.totalSizeBytes / (1024 * 1024)).toFixed(2);
+    const oldFiles = stats.files.filter(f => f.isOld);
+    const oldSizeMb = (oldFiles.reduce((acc, f) => acc + f.size, 0) / (1024 * 1024)).toFixed(2);
+
+    let html = `
+      <div class="space-y-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold text-white">Export Storage (vidhub_exports)</h3>
+            <p class="text-xs text-zinc-400">MP4 storage usage and 48h retention management</p>
+          </div>
+          <button id="btn-clear-old-exports" class="text-xs bg-red-600 hover:bg-red-500 text-white font-medium px-3.5 py-2 rounded-xl transition-colors flex items-center gap-1.5 shadow self-start md:self-auto cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            <span>Clear old exports (>48h)</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+            <span class="text-zinc-500 block text-[10px]">Total Files in Bucket</span>
+            <span class="text-lg font-bold text-white">${stats.fileCount}</span>
+          </div>
+          <div class="p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+            <span class="text-zinc-500 block text-[10px]">Approx. Total Size</span>
+            <span class="text-lg font-bold text-blue-400">${sizeMb} MB</span>
+          </div>
+          <div class="p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+            <span class="text-zinc-500 block text-[10px]">Eligible to Delete (>48h)</span>
+            <span class="text-lg font-bold ${oldFiles.length > 0 ? 'text-amber-400' : 'text-zinc-400'}">${oldFiles.length} files (${oldSizeMb} MB)</span>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <h4 class="text-xs font-semibold text-zinc-400">Stored Video Files:</h4>
+    `;
+
+    if (stats.files.length === 0) {
+      html += `<div class="p-6 text-center text-xs text-zinc-500 bg-zinc-950 border border-zinc-800 rounded-xl">No files currently in vidhub_exports bucket.</div>`;
+    } else {
+      stats.files.forEach(f => {
+        const fMb = (f.size / (1024 * 1024)).toFixed(2);
+        const timeStr = f.createdAt ? new Date(f.createdAt).toLocaleString() : 'Unknown';
+        html += `
+          <div class="p-3 bg-zinc-950 border border-zinc-800 rounded-xl flex items-center justify-between text-xs">
+            <div class="truncate mr-3">
+              <span class="font-mono text-white text-[11px] block truncate">${f.path}</span>
+              <span class="text-[10px] text-zinc-500">${timeStr}</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="font-mono text-zinc-300 text-[11px]">${fMb} MB</span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full ${f.isOld ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}">
+                ${f.isOld ? '>48h Old' : 'Recent'}
+              </span>
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    html += `</div></div>`;
+    elements.adminTabContent.innerHTML = html;
+
+    // Attach clear old exports button
+    const btnClear = elements.adminTabContent.querySelector('#btn-clear-old-exports') as HTMLButtonElement | null;
+    btnClear?.addEventListener('click', async () => {
+      if (!confirm('Delete all export files older than 48 hours for ALL clients?')) return;
+      btnClear.disabled = true;
+      btnClear.textContent = 'Clearing...';
+      const res = await clearAllOldExports();
+      alert(`Deleted ${res.deletedCount} files (${(res.freedBytes / (1024 * 1024)).toFixed(2)} MB freed).`);
+      renderAdminDashboardTab();
+    });
+
   } else if (currentAdminTab === 'beats') {
-    // 4. Beat Library
+    // 6. Beat Library
     const beats = await fetchAllBeats();
 
     let html = `
@@ -2519,7 +2694,12 @@ function formatTime(seconds: number): string {
 async function handleExport() {
   if (videoSequence.length === 0) return;
 
+  // Disable the Export button while exporting. Never start a second export by itself.
+  elements.btnExport.disabled = true;
+
   elements.modalExport.classList.remove('hidden');
+  elements.exportProgressView.classList.remove('hidden');
+  elements.exportCompleteView.classList.add('hidden');
   elements.exportProgressBar.style.width = '0%';
   elements.exportStatusText.textContent = "Loading FFmpeg...";
 
@@ -2828,32 +3008,215 @@ async function handleExport() {
       }
     }
 
-    elements.exportStatusText.textContent = "Finalizing video download...";
+    // Default export quality to 720p to optimize file size for Supabase storage (<50MB limit)
+    elements.exportStatusText.textContent = "Encoding 720p output...";
+    const out720p = 'export_720p.mp4';
+    try {
+      await ffmpeg.exec([
+        '-i', finalOutputFile,
+        '-vf', 'scale=720:-2:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1',
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-crf', '24',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        out720p
+      ]);
+      finalOutputFile = out720p;
+    } catch (scaleErr) {
+      console.warn('720p scaling fallback, using current output:', scaleErr);
+    }
+
+    elements.exportStatusText.textContent = "Reading finished video...";
     const data = await ffmpeg.readFile(finalOutputFile);
     const blob = new Blob([data], { type: 'video/mp4' });
-    const url = URL.createObjectURL(blob);
+    const blobUrl = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const exportFilename = `video-${dateStr}.mp4`;
+    const videoFile = new File([blob], exportFilename, { type: 'video/mp4' });
 
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `VidHub_${currentClientId}_${Date.now()}.mp4`;
-    a.click();
+    // Show Export complete screen (stays open until staff closes it)
+    elements.exportProgressView.classList.add('hidden');
+    elements.exportCompleteView.classList.remove('hidden');
+    elements.exportPreviewVideo.src = blobUrl;
+    elements.exportPreviewVideo.load();
 
-    // Record export to Supabase
-    recordProjectExport({
-      client_id: currentClientId,
-      staff_id: currentStaffId,
-      clip_sequence: videoSequence.map(c => ({ id: c.id, trimStart: c.trimStart, trimEnd: c.trimEnd })),
-      text_overlays: overlays.filter(o => o.type === 'text'),
-      image_overlays: overlays.filter(o => o.type === 'image' || o.type === 'overlay_clip'),
-      music_track_id: selectedMusic?.id || null,
-      total_duration_seconds: totalDur
-    });
+    // Reset feedback notices
+    elements.savePhoneNotice.classList.add('hidden');
+    elements.shareNotice.classList.add('hidden');
+    elements.exportUploadError.classList.add('hidden');
+    elements.exportLinkBox.classList.add('hidden');
+    elements.exportCloudStatus.classList.remove('hidden');
+    elements.exportCloudStatus.innerHTML = `
+      <svg class="animate-spin h-3.5 w-3.5 text-blue-400" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+      <span id="export-cloud-status-text">Saving a backup copy…</span>
+    `;
+    elements.btnCopyExportLink.disabled = true;
+    elements.copyLinkBtnText.textContent = 'Link not ready';
 
-    elements.modalExport.classList.add('hidden');
+    let uploadedCloudUrl: string | null = null;
+    let uploadedFilePath: string | null = null;
+
+    // 1. Button: Save to phone — BIGGEST button, strong colour. Direct download inside tap handler
+    elements.btnSaveToPhone.onclick = () => {
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = exportFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      elements.savePhoneNotice.classList.remove('hidden');
+    };
+
+    // 2. Button: Share (WhatsApp, Facebook…) — big colour button
+    elements.btnShareExport.onclick = async () => {
+      elements.shareNotice.classList.add('hidden');
+      if (navigator.share) {
+        try {
+          if (navigator.canShare && navigator.canShare({ files: [videoFile] })) {
+            await navigator.share({
+              files: [videoFile],
+              title: exportFilename,
+              text: 'Marketing Video'
+            });
+            return;
+          } else if (uploadedCloudUrl) {
+            await navigator.share({
+              url: uploadedCloudUrl,
+              title: exportFilename,
+              text: 'Marketing Video'
+            });
+            return;
+          } else {
+            elements.shareNotice.textContent = "Sharing is not supported here. Use Save to phone.";
+            elements.shareNotice.classList.remove('hidden');
+          }
+        } catch (err: any) {
+          if (err.name !== 'AbortError') {
+            if (uploadedCloudUrl) {
+              try {
+                await navigator.share({ url: uploadedCloudUrl });
+                return;
+              } catch {}
+            }
+            elements.shareNotice.textContent = "Sharing is not supported here. Use Save to phone.";
+            elements.shareNotice.classList.remove('hidden');
+          }
+        }
+      } else {
+        elements.shareNotice.textContent = "Sharing is not supported here. Use Save to phone.";
+        elements.shareNotice.classList.remove('hidden');
+      }
+    };
+
+    // 3. Button: Copy link — smaller button
+    elements.btnCopyExportLink.onclick = async () => {
+      if (!uploadedCloudUrl) return;
+      try {
+        await navigator.clipboard.writeText(uploadedCloudUrl);
+        elements.copyLinkBtnText.textContent = 'Link copied';
+        setTimeout(() => {
+          if (uploadedCloudUrl) elements.copyLinkBtnText.textContent = 'Copy link';
+        }, 2500);
+      } catch {
+        elements.exportLinkBox.classList.remove('hidden');
+        elements.copyLinkBtnText.textContent = 'Select link below';
+      }
+    };
+
+    // 4. Button: Back to editing — smaller button; closes screen, keeps project
+    elements.btnBackToEditing.onclick = () => {
+      elements.modalExport.classList.add('hidden');
+      elements.btnExport.disabled = false;
+    };
+
+    // Background upload finished MP4 to Supabase storage bucket 'vidhub_exports'
+    const isOver50MB = blob.size > 50 * 1024 * 1024;
+    if (isOver50MB) {
+      elements.exportCloudStatus.classList.add('hidden');
+      elements.exportUploadError.classList.remove('hidden');
+      elements.exportUploadErrorMsg.textContent = `File size (${(blob.size / (1024 * 1024)).toFixed(1)}MB) exceeds the Supabase free plan 50MB limit.`;
+      elements.copyLinkBtnText.textContent = 'Link not ready';
+      elements.btnCopyExportLink.disabled = true;
+
+      await recordProjectExport({
+        client_id: currentClientId,
+        staff_id: currentStaffId,
+        clip_sequence: videoSequence.map(c => ({ id: c.id, trimStart: c.trimStart, trimEnd: c.trimEnd })),
+        text_overlays: overlays.filter(o => o.type === 'text'),
+        image_overlays: overlays.filter(o => o.type === 'image' || o.type === 'overlay_clip'),
+        music_track_id: selectedMusic?.id || null,
+        total_duration_seconds: totalDur,
+        exported_video_url: null,
+        exported_file_path: null,
+        exported_at: new Date().toISOString()
+      });
+    } else {
+      try {
+        const uploadRes = await uploadExportToSupabase(currentClientId, currentStaffId, blob);
+        uploadedCloudUrl = uploadRes.publicUrl;
+        uploadedFilePath = uploadRes.filePath;
+
+        elements.exportCloudStatus.innerHTML = `
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span class="text-emerald-400 font-medium">Backup copy saved to cloud</span>
+        `;
+        elements.exportLinkBox.classList.remove('hidden');
+        elements.exportLinkText.textContent = uploadedCloudUrl;
+        elements.btnCopyExportLink.disabled = false;
+        elements.copyLinkBtnText.textContent = 'Copy link';
+
+        await recordProjectExport({
+          client_id: currentClientId,
+          staff_id: currentStaffId,
+          clip_sequence: videoSequence.map(c => ({ id: c.id, trimStart: c.trimStart, trimEnd: c.trimEnd })),
+          text_overlays: overlays.filter(o => o.type === 'text'),
+          image_overlays: overlays.filter(o => o.type === 'image' || o.type === 'overlay_clip'),
+          music_track_id: selectedMusic?.id || null,
+          total_duration_seconds: totalDur,
+          exported_video_url: uploadedCloudUrl,
+          exported_file_path: uploadedFilePath,
+          exported_at: new Date().toISOString()
+        });
+      } catch (err: any) {
+        console.warn('Supabase export upload failed:', err);
+        const errMsg = err?.message || String(err);
+        elements.exportCloudStatus.classList.add('hidden');
+        elements.exportUploadError.classList.remove('hidden');
+        elements.exportUploadErrorMsg.textContent = `Upload error: ${errMsg}`;
+        elements.copyLinkBtnText.textContent = 'Link not ready';
+        elements.btnCopyExportLink.disabled = true;
+
+        await recordProjectExport({
+          client_id: currentClientId,
+          staff_id: currentStaffId,
+          clip_sequence: videoSequence.map(c => ({ id: c.id, trimStart: c.trimStart, trimEnd: c.trimEnd })),
+          text_overlays: overlays.filter(o => o.type === 'text'),
+          image_overlays: overlays.filter(o => o.type === 'image' || o.type === 'overlay_clip'),
+          music_track_id: selectedMusic?.id || null,
+          total_duration_seconds: totalDur,
+          exported_video_url: null,
+          exported_file_path: null,
+          exported_at: new Date().toISOString()
+        });
+      }
+    }
   } catch (e: any) {
     console.error(e);
-    elements.exportStatusText.textContent = "Export Failed. Falling back...";
-    setTimeout(() => elements.modalExport.classList.add('hidden'), 3000);
+    elements.exportStatusText.textContent = `Export Failed: ${e?.message || e}. Please try again.`;
+    elements.btnExport.disabled = false;
+    const existingClose = elements.exportProgressView.querySelector('.btn-close-export-error');
+    if (!existingClose) {
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'btn-close-export-error mt-4 px-4 py-2 bg-zinc-800 text-white rounded-xl text-xs font-medium hover:bg-zinc-700 cursor-pointer';
+      closeBtn.textContent = 'Close';
+      closeBtn.onclick = () => {
+        elements.modalExport.classList.add('hidden');
+        elements.btnExport.disabled = false;
+        closeBtn.remove();
+      };
+      elements.exportProgressView.appendChild(closeBtn);
+    }
   }
 }
 

@@ -37,6 +37,7 @@ export interface VidhubProjectRow {
   voiceover_url?: string | null;
   total_duration_seconds: number;
   exported_video_url?: string | null;
+  exported_file_path?: string | null;
   created_at?: string;
   exported_at?: string;
 }
@@ -267,7 +268,7 @@ export async function fetchMasterAnalytics() {
  */
 export async function recordProjectExport(project: VidhubProjectRow) {
   try {
-    await supabase.from('vidhub_projects').insert({
+    const { data, error } = await supabase.from('vidhub_projects').insert({
       client_id: project.client_id,
       staff_id: project.staff_id,
       clip_sequence: project.clip_sequence,
@@ -276,10 +277,223 @@ export async function recordProjectExport(project: VidhubProjectRow) {
       music_track_id: project.music_track_id,
       voiceover_url: project.voiceover_url,
       total_duration_seconds: project.total_duration_seconds,
-      exported_video_url: project.exported_video_url,
-      exported_at: new Date().toISOString()
-    });
+      exported_video_url: project.exported_video_url || null,
+      exported_file_path: project.exported_file_path || null,
+      exported_at: project.exported_at || new Date().toISOString()
+    }).select().maybeSingle();
+
+    if (error) {
+      console.warn('recordProjectExport warning:', error.message);
+    }
+    return data;
   } catch (err) {
     console.warn('recordProjectExport error:', err);
+    return null;
   }
 }
+
+/**
+ * Upload finished export MP4 to vidhub_exports bucket and return public URL & path
+ */
+export async function uploadExportToSupabase(
+  clientId: string,
+  staffId: string,
+  file: Blob | File
+): Promise<{ publicUrl: string; filePath: string }> {
+  const timestamp = Date.now();
+  const filePath = `${clientId}/${staffId}/${timestamp}.mp4`;
+
+  const { data, error } = await supabase.storage
+    .from('vidhub_exports')
+    .upload(filePath, file, { contentType: 'video/mp4', upsert: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const { data: urlData } = supabase.storage
+    .from('vidhub_exports')
+    .getPublicUrl(filePath);
+
+  return {
+    publicUrl: urlData?.publicUrl || '',
+    filePath
+  };
+}
+
+/**
+ * Clean up exports older than 48 hours for a specific staff member
+ */
+export async function cleanupOldStaffExports(clientId: string, staffId: string) {
+  try {
+    const folder = `${clientId}/${staffId}`;
+    const { data: files, error } = await supabase.storage
+      .from('vidhub_exports')
+      .list(folder, { limit: 100 });
+
+    if (error || !files) return;
+
+    const twoDaysAgo = Date.now() - 48 * 60 * 60 * 1000;
+    const toDelete: string[] = [];
+
+    for (const f of files) {
+      if (!f.name) continue;
+      const t = new Date(f.created_at || f.updated_at).getTime();
+      if (t && t < twoDaysAgo) {
+        toDelete.push(`${folder}/${f.name}`);
+      }
+    }
+
+    if (toDelete.length > 0) {
+      await supabase.storage.from('vidhub_exports').remove(toDelete);
+    }
+  } catch (err) {
+    console.warn('cleanupOldStaffExports error:', err);
+  }
+}
+
+/**
+ * Clean up raw clips in vidhub_clips older than 48 hours for a staff member
+ */
+export async function cleanupOldStaffClips(clientId: string, staffId: string) {
+  try {
+    const folder = `${clientId}/${staffId}`;
+    const { data: files, error } = await supabase.storage
+      .from('vidhub_clips')
+      .list(folder, { limit: 100 });
+
+    if (error || !files) return;
+
+    const twoDaysAgo = Date.now() - 48 * 60 * 60 * 1000;
+    const toDelete: string[] = [];
+
+    for (const f of files) {
+      if (!f.name) continue;
+      const t = new Date(f.created_at || f.updated_at).getTime();
+      if (t && t < twoDaysAgo) {
+        toDelete.push(`${folder}/${f.name}`);
+      }
+    }
+
+    if (toDelete.length > 0) {
+      await supabase.storage.from('vidhub_clips').remove(toDelete);
+    }
+  } catch (err) {
+    console.warn('cleanupOldStaffClips error:', err);
+  }
+}
+
+/**
+ * Fetch exports from the last 2 days (48 hours), newest first
+ */
+export async function fetchRecentExports() {
+  try {
+    const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from('vidhub_projects')
+      .select('*')
+      .gte('exported_at', twoDaysAgo)
+      .not('exported_video_url', 'is', null)
+      .order('exported_at', { ascending: false });
+
+    if (error) {
+      console.warn('fetchRecentExports warning:', error.message);
+      // Fallback query
+      const { data: fallback } = await supabase
+        .from('vidhub_projects')
+        .select('*')
+        .not('exported_video_url', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      return fallback || [];
+    }
+    return data || [];
+  } catch (err) {
+    console.warn('fetchRecentExports exception:', err);
+    return [];
+  }
+}
+
+/**
+ * Get export storage statistics across all clients in vidhub_exports
+ */
+export async function fetchExportStorageStats(): Promise<{
+  fileCount: number;
+  totalSizeBytes: number;
+  files: { path: string; name: string; size: number; createdAt: string; isOld: boolean }[];
+}> {
+  const result = {
+    fileCount: 0,
+    totalSizeBytes: 0,
+    files: [] as { path: string; name: string; size: number; createdAt: string; isOld: boolean }[]
+  };
+
+  try {
+    const twoDaysAgo = Date.now() - 48 * 60 * 60 * 1000;
+    const { data: clientFolders } = await supabase.storage.from('vidhub_exports').list('');
+    if (!clientFolders) return result;
+
+    for (const c of clientFolders) {
+      if (!c.name) continue;
+      const { data: staffFolders } = await supabase.storage.from('vidhub_exports').list(c.name);
+      if (!staffFolders) continue;
+
+      for (const s of staffFolders) {
+        if (!s.name) continue;
+        const folder = `${c.name}/${s.name}`;
+        const { data: files } = await supabase.storage.from('vidhub_exports').list(folder);
+        if (!files) continue;
+
+        for (const f of files) {
+          if (!f.id || !f.name) continue;
+          const size = f.metadata?.size || 0;
+          const t = new Date(f.created_at || f.updated_at).getTime() || 0;
+          const isOld = t > 0 && t < twoDaysAgo;
+
+          result.fileCount++;
+          result.totalSizeBytes += size;
+          result.files.push({
+            path: `${folder}/${f.name}`,
+            name: f.name,
+            size,
+            createdAt: f.created_at || f.updated_at || '',
+            isOld
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('fetchExportStorageStats error:', err);
+  }
+
+  return result;
+}
+
+/**
+ * Clear all exports older than 48 hours across ALL clients
+ */
+export async function clearAllOldExports(): Promise<{ deletedCount: number; freedBytes: number }> {
+  try {
+    const stats = await fetchExportStorageStats();
+    const oldFiles = stats.files.filter(f => f.isOld);
+
+    if (oldFiles.length === 0) {
+      return { deletedCount: 0, freedBytes: 0 };
+    }
+
+    const pathsToDelete = oldFiles.map(f => f.path);
+    let freedBytes = 0;
+    oldFiles.forEach(f => { freedBytes += f.size; });
+
+    for (let i = 0; i < pathsToDelete.length; i += 100) {
+      const batch = pathsToDelete.slice(i, i + 100);
+      await supabase.storage.from('vidhub_exports').remove(batch);
+    }
+
+    return { deletedCount: oldFiles.length, freedBytes };
+  } catch (err) {
+    console.warn('clearAllOldExports error:', err);
+    return { deletedCount: 0, freedBytes: 0 };
+  }
+}
+
