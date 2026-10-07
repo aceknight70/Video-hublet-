@@ -203,6 +203,11 @@
         <span class="text-[10px] font-medium text-zinc-400">PiP</span>
       </button>
 
+      <button id="tool-overlay-clip" class="flex flex-col items-center justify-center w-16 h-16 rounded-xl hover:bg-zinc-900 transition-colors shrink-0" title="Overlay Clip (Picture or Video)">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1 text-cyan-400"><rect x="3" y="3" width="13" height="13" rx="2" ry="2"></rect><path d="M8 8h13v13H8z" stroke-dasharray="2 2" stroke="currentColor"></path></svg>
+        <span class="text-[9px] font-medium text-zinc-400 leading-tight text-center">Overlay Clip</span>
+      </button>
+
       <button id="tool-transition" class="flex flex-col items-center justify-center w-16 h-16 rounded-xl hover:bg-zinc-900 transition-colors shrink-0 relative group">
         <div id="transition-active-dot" class="absolute top-2 right-3 w-2 h-2 rounded-full bg-blue-500"></div>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1 text-blue-400"><path d="M4 12h16M14 6l6 6-6 6"/><circle cx="4" cy="12" r="2"/></svg>
@@ -243,6 +248,7 @@
     <input type="file" id="upload-input" accept="video/mp4,video/quicktime,video/webm" class="hidden" multiple />
     <input type="file" id="image-upload-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" class="hidden" />
     <input type="file" id="pip-upload-input" accept="video/mp4,video/quicktime,video/webm" class="hidden" />
+    <input type="file" id="overlay-clip-upload-input" accept="image/png,image/jpeg,image/webp,image/svg+xml,video/mp4,video/quicktime,video/webm" class="hidden" />
 
     <!-- Modals -->
     <!-- Text Modal -->

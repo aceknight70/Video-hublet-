@@ -67,10 +67,10 @@ export interface VideoClip {
 
 export interface OverlayClip {
   id: string;
-  type: 'text' | 'image' | 'audio' | 'voiceover';
-  content?: string; // Text content or image file url
+  type: 'text' | 'image' | 'audio' | 'voiceover' | 'overlay_clip';
+  content?: string; // Text content or image/video file url
   file?: Blob;
-  style?: string; // e.g. "Fade In", "Slide"
+  style?: string; // e.g. "Fade In", "Slide", "pip", "overlay_clip"
   startTime: number; // global start time on timeline
   duration: number;
   shape?: ImageShape; // for image overlays
@@ -78,6 +78,8 @@ export interface OverlayClip {
   y?: number; // percentage (0 - 100) on preview stage
   width?: number; // percentage on preview stage
   height?: number; // percentage on preview stage
+  isVideo?: boolean; // true if video overlay, false if picture
+  isMuted?: boolean; // mute toggle for video overlays
 }
 
 export interface MusicTrackSelection {
@@ -175,6 +177,7 @@ const elements = {
   toolText: document.getElementById('tool-text') as HTMLButtonElement,
   toolImage: document.getElementById('tool-image') as HTMLButtonElement,
   toolPip: document.getElementById('tool-pip') as HTMLButtonElement,
+  toolOverlayClip: document.getElementById('tool-overlay-clip') as HTMLButtonElement,
   toolTransition: document.getElementById('tool-transition') as HTMLButtonElement,
   toolMusic: document.getElementById('tool-music') as HTMLButtonElement,
   toolVo: document.getElementById('tool-vo') as HTMLButtonElement,
@@ -186,6 +189,7 @@ const elements = {
   uploadInput: document.getElementById('upload-input') as HTMLInputElement,
   imageUploadInput: document.getElementById('image-upload-input') as HTMLInputElement,
   pipUploadInput: document.getElementById('pip-upload-input') as HTMLInputElement,
+  overlayClipUploadInput: document.getElementById('overlay-clip-upload-input') as HTMLInputElement,
   btnInlineAdd: document.getElementById('btn-inline-add') as HTMLButtonElement,
 
   // Modals
@@ -254,6 +258,9 @@ function init() {
 
   elements.toolPip?.addEventListener('click', () => elements.pipUploadInput.click());
   elements.pipUploadInput?.addEventListener('change', handlePipUpload);
+
+  elements.toolOverlayClip?.addEventListener('click', () => elements.overlayClipUploadInput.click());
+  elements.overlayClipUploadInput?.addEventListener('change', handleOverlayClipUpload);
 
   elements.btnPlayPause.addEventListener('click', togglePlay);
   elements.toolDelete.addEventListener('click', promptDeleteSelected);
@@ -437,12 +444,58 @@ async function handlePipUpload(e: Event) {
     x: 60,
     y: 10,
     width: 35,
-    height: 35
+    height: 35,
+    isVideo: true,
+    isMuted: true
   };
 
   overlays.push(pipOverlay);
   target.value = '';
   selectItem(pipOverlay.id, 'overlay');
+  renderTimeline();
+  updatePlayheadAndPreview();
+}
+
+// --- NEW TOOL: OVERLAY CLIP (PICTURE OR VIDEO, ANY LENGTH UP TO FULL TIMELINE) ---
+async function handleOverlayClipUpload(e: Event) {
+  const target = e.target as HTMLInputElement;
+  if (!target.files || target.files.length === 0) return;
+  const file = target.files[0];
+  const url = URL.createObjectURL(file);
+  const isVideo = file.type.startsWith('video/');
+
+  let naturalDur = 5;
+  if (isVideo) {
+    naturalDur = await getVideoDuration(url);
+  }
+
+  const totalDur = getTotalDuration();
+  // Length can default to natural duration or up to full remaining timeline, adjustable up to full timeline
+  const remainingTimeline = totalDur > 0 ? Math.max(0.5, totalDur - currentGlobalTime) : naturalDur;
+  const initDur = isVideo 
+    ? Math.min(naturalDur, remainingTimeline) 
+    : (totalDur > 0 ? remainingTimeline : 5);
+
+  const overlayClip: OverlayClip = {
+    id: `ovclip_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    type: 'overlay_clip',
+    file,
+    content: url,
+    style: 'overlay_clip',
+    shape: 'rectangle',
+    startTime: currentGlobalTime,
+    duration: Math.max(0.5, initDur),
+    x: 25,
+    y: 25,
+    width: 45,
+    height: 45,
+    isVideo,
+    isMuted: true // default muted, with toggle to unmute
+  };
+
+  overlays.push(overlayClip);
+  target.value = '';
+  selectItem(overlayClip.id, 'overlay');
   renderTimeline();
   updatePlayheadAndPreview();
 }
@@ -634,9 +687,21 @@ function renderTimeline() {
       innerContent.appendChild(contentSpan);
       div.appendChild(innerContent);
       elements.trackText.appendChild(div);
+    } else if (overlay.type === 'overlay_clip') {
+      div.classList.add(overlay.isVideo ? 'bg-cyan-600/80' : 'bg-teal-600/80', 'text-white');
+      const soundBadge = overlay.isVideo ? (overlay.isMuted !== false ? ' [🔇]' : ' [🔊]') : '';
+      contentSpan.textContent = `Overlay ${overlay.isVideo ? 'Video' : 'Pic'}${soundBadge}`;
+      innerContent.appendChild(contentSpan);
+      div.appendChild(innerContent);
+      if (elements.trackImage) {
+        elements.trackImage.appendChild(div);
+      } else {
+        elements.trackText.appendChild(div);
+      }
     } else if (overlay.type === 'image') {
       div.classList.add(overlay.style === 'pip' ? 'bg-purple-600/80' : 'bg-amber-600/80', 'text-white');
-      contentSpan.textContent = overlay.style === 'pip' ? 'PiP Video' : `Image [${getShapeIcon(overlay.shape || 'rectangle')}]`;
+      const pipSoundBadge = overlay.style === 'pip' ? (overlay.isMuted !== false ? ' [🔇]' : ' [🔊]') : '';
+      contentSpan.textContent = overlay.style === 'pip' ? `PiP Video${pipSoundBadge}` : `Image [${getShapeIcon(overlay.shape || 'rectangle')}]`;
       innerContent.appendChild(contentSpan);
       div.appendChild(innerContent);
       if (elements.trackImage) {
@@ -1274,41 +1339,145 @@ function updatePlayheadAndPreview() {
 
 // --- ITEM 3: SHAPE FRAMES & ON-STAGE DRAG/RESIZE FOR OVERLAYS ---
 function renderActiveOverlays() {
-  elements.overlayContainer.innerHTML = '';
   const currentlyActiveAudioIds = new Set<string>();
+  const currentlyActiveOverlayIds = new Set<string>();
 
+  // Determine active overlays
   overlays.forEach(overlay => {
     const isActive = currentGlobalTime >= overlay.startTime && currentGlobalTime < overlay.startTime + overlay.duration;
+    if (isActive) currentlyActiveOverlayIds.add(overlay.id);
+  });
+
+  // Remove elements from overlayContainer that are no longer active
+  const existingDomNodes = Array.from(elements.overlayContainer.children) as HTMLElement[];
+  existingDomNodes.forEach(node => {
+    const oid = node.dataset.overlayId;
+    if (oid && !currentlyActiveOverlayIds.has(oid)) {
+      node.remove();
+    }
+  });
+
+  overlays.forEach(overlay => {
+    const isActive = currentlyActiveOverlayIds.has(overlay.id);
     if (!isActive) return;
 
     if (overlay.type === 'text') {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'absolute pointer-events-auto cursor-move select-none p-2 border border-dashed border-transparent hover:border-white/50 transition-colors';
+      let wrapper = elements.overlayContainer.querySelector(`[data-overlay-id="${overlay.id}"]`) as HTMLDivElement | null;
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.dataset.overlayId = overlay.id;
+        wrapper.className = 'absolute pointer-events-auto cursor-move select-none p-2 border border-dashed border-transparent hover:border-white/50 transition-colors';
+        const div = document.createElement('div');
+        div.className = 'text-white font-bold text-2xl text-center drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]';
+        div.textContent = overlay.content || '';
+        setupStageDrag(wrapper, overlay);
+        wrapper.appendChild(div);
+        wrapper.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectItem(overlay.id, 'overlay');
+        });
+        elements.overlayContainer.appendChild(wrapper);
+      }
+
       wrapper.style.left = `${overlay.x !== undefined ? overlay.x : 50}%`;
       wrapper.style.top = `${overlay.y !== undefined ? overlay.y : 50}%`;
       wrapper.style.transform = 'translate(-50%, -50%)';
 
-      const div = document.createElement('div');
-      div.className = 'text-white font-bold text-2xl text-center drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]';
-      div.textContent = overlay.content || '';
-
-      if (overlay.style === 'Fade In') {
-        const prog = currentGlobalTime - overlay.startTime;
-        div.style.opacity = Math.min(prog / 0.5, 1).toString();
-      } else if (overlay.style === 'Slide') {
-        const prog = Math.max(0, 40 - (currentGlobalTime - overlay.startTime) * 80);
-        div.style.transform = `translateY(${prog}px)`;
+      const textDiv = wrapper.firstElementChild as HTMLElement;
+      if (textDiv) {
+        textDiv.textContent = overlay.content || '';
+        if (overlay.style === 'Fade In') {
+          const prog = currentGlobalTime - overlay.startTime;
+          textDiv.style.opacity = Math.min(prog / 0.5, 1).toString();
+        } else if (overlay.style === 'Slide') {
+          const prog = Math.max(0, 40 - (currentGlobalTime - overlay.startTime) * 80);
+          textDiv.style.transform = `translateY(${prog}px)`;
+        } else {
+          textDiv.style.opacity = '1';
+          textDiv.style.transform = 'none';
+        }
       }
 
-      // Dragging text on video stage
-      setupStageDrag(wrapper, overlay);
+    } else if (overlay.type === 'image' || overlay.type === 'overlay_clip') {
+      const isVideoOverlay = overlay.style === 'pip' || overlay.isVideo === true;
+      let wrapper = elements.overlayContainer.querySelector(`[data-overlay-id="${overlay.id}"]`) as HTMLDivElement | null;
 
-      wrapper.appendChild(div);
-      elements.overlayContainer.appendChild(wrapper);
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.dataset.overlayId = overlay.id;
+        wrapper.className = 'absolute pointer-events-auto cursor-move select-none group border border-dashed border-white/40 hover:border-white transition-all shadow-md';
 
-    } else if (overlay.type === 'image') {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'absolute pointer-events-auto cursor-move select-none group border border-dashed border-white/40 hover:border-white transition-all shadow-md';
+        if (isVideoOverlay) {
+          // Video player on stage (PiP or Overlay Clip video)
+          const pipVideo = document.createElement('video');
+          pipVideo.src = overlay.content || '';
+          pipVideo.autoplay = isPlaying;
+          pipVideo.muted = overlay.isMuted !== false;
+          pipVideo.loop = true;
+          pipVideo.playsInline = true;
+          pipVideo.className = 'w-full h-full object-cover rounded-lg shadow-xl pointer-events-none';
+          wrapper.appendChild(pipVideo);
+
+          // Mute/unmute toggle in corner
+          const muteBtn = document.createElement('button');
+          const isMuted = overlay.isMuted !== false;
+          muteBtn.className = `absolute -top-3 -left-3 w-7 h-7 rounded-full ${isMuted ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-600' : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400'} flex items-center justify-center text-xs shadow-xl border transition-all active:scale-90 z-30 cursor-pointer pointer-events-auto`;
+          muteBtn.title = isMuted ? 'Audio Muted in export (Click to Unmute)' : 'Sound Included in export (Click to Mute)';
+          muteBtn.innerHTML = isMuted
+            ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>`
+            : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`;
+          muteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            overlay.isMuted = !isMuted;
+            renderTimeline();
+            updatePlayheadAndPreview();
+          });
+          wrapper.appendChild(muteBtn);
+        } else {
+          // Image element
+          const img = document.createElement('img');
+          img.src = overlay.content || '';
+          img.className = 'w-full h-full object-cover rounded-lg pointer-events-none';
+          if (overlay.type === 'image') {
+            img.style.clipPath = getShapeCssClipPath(overlay.shape || 'rectangle');
+          }
+          wrapper.appendChild(img);
+
+          if (overlay.type === 'image') {
+            // Corner shape toggle button: Rectangle -> Circle -> Heart -> Rectangle
+            const shapeBtn = document.createElement('button');
+            shapeBtn.className = 'absolute -top-3 -left-3 w-6 h-6 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center text-xs shadow-lg border border-white/20 transition-transform active:scale-90 z-30 cursor-pointer pointer-events-auto';
+            shapeBtn.title = `Current Frame: ${overlay.shape || 'rectangle'} (Click to cycle)`;
+            shapeBtn.innerHTML = `<span>${getShapeIcon(overlay.shape || 'rectangle')}</span>`;
+            shapeBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              overlay.shape = getNextShape(overlay.shape || 'rectangle');
+              renderTimeline();
+              updatePlayheadAndPreview();
+            });
+            wrapper.appendChild(shapeBtn);
+          }
+        }
+
+        // Corner resize handle
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'absolute -bottom-2 -right-2 w-5 h-5 bg-white text-black rounded-full cursor-nwse-resize flex items-center justify-center shadow z-30 pointer-events-auto';
+        resizeHandle.innerHTML = '<span class="text-[9px]">↘</span>';
+        setupStageResize(resizeHandle, wrapper, overlay);
+        wrapper.appendChild(resizeHandle);
+
+        // Stage drag
+        setupStageDrag(wrapper, overlay);
+
+        wrapper.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectItem(overlay.id, 'overlay');
+        });
+
+        elements.overlayContainer.appendChild(wrapper);
+      }
+
+      // Sync position and size
       const wPct = overlay.width || 40;
       const hPct = overlay.height || 40;
       wrapper.style.width = `${wPct}%`;
@@ -1316,54 +1485,21 @@ function renderActiveOverlays() {
       wrapper.style.left = `${overlay.x !== undefined ? overlay.x : 30}%`;
       wrapper.style.top = `${overlay.y !== undefined ? overlay.y : 30}%`;
 
-      if (overlay.style === 'pip') {
-        // PiP Video Player on stage
-        const pipVideo = document.createElement('video');
-        pipVideo.src = overlay.content || '';
-        pipVideo.autoplay = isPlaying;
-        pipVideo.muted = true;
-        pipVideo.loop = true;
-        pipVideo.playsInline = true;
-        pipVideo.className = 'w-full h-full object-cover rounded-lg shadow-xl';
-        wrapper.appendChild(pipVideo);
-      } else {
-        // Image element with Shape Frame
-        const img = document.createElement('img');
-        img.src = overlay.content || '';
-        img.className = 'w-full h-full object-cover';
-        img.style.clipPath = getShapeCssClipPath(overlay.shape || 'rectangle');
-        wrapper.appendChild(img);
-
-        // Corner shape toggle button: Rectangle -> Circle -> Heart -> Rectangle
-        const shapeBtn = document.createElement('button');
-        shapeBtn.className = 'absolute -top-3 -left-3 w-6 h-6 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center text-xs shadow-lg border border-white/20 transition-transform active:scale-90 z-30 cursor-pointer';
-        shapeBtn.title = `Current Frame: ${overlay.shape || 'rectangle'} (Click to cycle)`;
-        shapeBtn.innerHTML = `<span>${getShapeIcon(overlay.shape || 'rectangle')}</span>`;
-        shapeBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          overlay.shape = getNextShape(overlay.shape || 'rectangle');
-          renderTimeline();
-          updatePlayheadAndPreview();
-        });
-        wrapper.appendChild(shapeBtn);
+      if (isVideoOverlay) {
+        const vid = wrapper.querySelector('video');
+        if (vid) {
+          vid.muted = overlay.isMuted !== false;
+          const localTime = Math.max(0, currentGlobalTime - overlay.startTime);
+          if (isPlaying) {
+            if (vid.paused) vid.play().catch(() => {});
+          } else {
+            if (!vid.paused) vid.pause();
+            if (Math.abs(vid.currentTime - localTime) > 0.25) {
+              vid.currentTime = localTime % (vid.duration || 10);
+            }
+          }
+        }
       }
-
-      // Corner resize handle
-      const resizeHandle = document.createElement('div');
-      resizeHandle.className = 'absolute -bottom-2 -right-2 w-5 h-5 bg-white text-black rounded-full cursor-nwse-resize flex items-center justify-center shadow z-30';
-      resizeHandle.innerHTML = '<span class="text-[9px]">↘</span>';
-      setupStageResize(resizeHandle, wrapper, overlay);
-      wrapper.appendChild(resizeHandle);
-
-      // Stage drag
-      setupStageDrag(wrapper, overlay);
-
-      wrapper.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectItem(overlay.id, 'overlay');
-      });
-
-      elements.overlayContainer.appendChild(wrapper);
 
     } else if (overlay.type === 'voiceover' && overlay.file) {
       currentlyActiveAudioIds.add(overlay.id);
@@ -2473,14 +2609,90 @@ async function handleExport() {
       'raw_sequence.mp4'
     ]);
 
-    // Handle Masked Images (Circle, Heart) overlays
-    const imageOverlays = overlays.filter(o => o.type === 'image' && o.file);
     let currentInputVideo = 'raw_sequence.mp4';
 
-    if (imageOverlays.length > 0) {
-      elements.exportStatusText.textContent = "Overlaying shape framed images...";
-      for (let i = 0; i < imageOverlays.length; i++) {
-        const ov = imageOverlays[i];
+    // 1. Handle Video Overlays (PiP videos and Overlay Clip videos)
+    const videoOverlays = overlays.filter(o => 
+      (o.style === 'pip' || (o.type === 'overlay_clip' && o.isVideo) || (o.isVideo && o.file)) && o.file
+    );
+
+    if (videoOverlays.length > 0) {
+      elements.exportStatusText.textContent = "Compositing video overlays...";
+      for (let i = 0; i < videoOverlays.length; i++) {
+        const ov = videoOverlays[i];
+        if (!ov.file) continue;
+
+        const ovVidFileName = `overlay_vid_${i}.mp4`;
+        await ffmpeg.writeFile(ovVidFileName, await fetchFile(ov.file));
+
+        const outWithVid = `vid_comp_${i}.mp4`;
+        const startSec = ov.startTime;
+        const endSec = ov.startTime + ov.duration;
+        const dur = ov.duration;
+        const targetW = Math.max(120, Math.round(1080 * ((ov.width || 35) / 100)));
+        const targetH = Math.max(120, Math.round(1920 * ((ov.height || 35) / 100)));
+        const xPos = Math.round((ov.x !== undefined ? ov.x : 30) * 10.8);
+        const yPos = Math.round((ov.y !== undefined ? ov.y : 30) * 19.2);
+        const isMuted = ov.isMuted !== false;
+
+        try {
+          if (!isMuted) {
+            try {
+              const delayMs = Math.round(startSec * 1000);
+              await ffmpeg.exec([
+                '-i', currentInputVideo,
+                '-stream_loop', '-1',
+                '-i', ovVidFileName,
+                '-filter_complex',
+                `[1:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=increase,crop=${targetW}:${targetH},setpts=PTS-STARTPTS+${startSec.toFixed(2)}/TB[ov];` +
+                `[0:v][ov]overlay=${xPos}:${yPos}:enable='between(t,${startSec.toFixed(2)},${endSec.toFixed(2)})'[v];` +
+                `[1:a]atrim=0:${dur.toFixed(2)},asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs},volume=1.0[delayed_ov_a];` +
+                `[0:a][delayed_ov_a]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+                '-map', '[v]',
+                '-map', '[aout]',
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-c:a', 'aac',
+                outWithVid
+              ]);
+              currentInputVideo = outWithVid;
+              continue;
+            } catch (aErr) {
+              console.warn('Overlay audio mix fallback to video only:', aErr);
+            }
+          }
+
+          // Video-only overlay (muted or audio fallback)
+          await ffmpeg.exec([
+            '-i', currentInputVideo,
+            '-stream_loop', '-1',
+            '-i', ovVidFileName,
+            '-filter_complex',
+            `[1:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=increase,crop=${targetW}:${targetH},setpts=PTS-STARTPTS+${startSec.toFixed(2)}/TB[ov];` +
+            `[0:v][ov]overlay=${xPos}:${yPos}:enable='between(t,${startSec.toFixed(2)},${endSec.toFixed(2)})'[v]`,
+            '-map', '[v]',
+            '-map', '0:a?',
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-c:a', 'copy',
+            outWithVid
+          ]);
+          currentInputVideo = outWithVid;
+        } catch (vidErr) {
+          console.warn('Video overlay compositing fallback:', vidErr);
+        }
+      }
+    }
+
+    // 2. Handle Picture Overlays (Image tool shape masks & Overlay Clip pictures)
+    const pictureOverlays = overlays.filter(o => 
+      ((o.type === 'image' && o.style !== 'pip') || (o.type === 'overlay_clip' && !o.isVideo)) && o.file
+    );
+
+    if (pictureOverlays.length > 0) {
+      elements.exportStatusText.textContent = "Overlaying picture overlays...";
+      for (let i = 0; i < pictureOverlays.length; i++) {
+        const ov = pictureOverlays[i];
         if (!ov.file) continue;
 
         // Render masked shape onto transparent canvas
@@ -2488,15 +2700,17 @@ async function handleExport() {
         imgEl.src = URL.createObjectURL(ov.file);
         await new Promise(res => { imgEl.onload = res; imgEl.onerror = res; });
 
-        const maskedBlob = await renderMaskedImageBlob(imgEl, ov.shape || 'rectangle', 360, 360);
-        const imgFileName = `overlay_${i}.png`;
+        const targetW = Math.max(100, Math.round(1080 * ((ov.width || 40) / 100)));
+        const targetH = Math.max(100, Math.round(1920 * ((ov.height || 40) / 100)));
+        const maskedBlob = await renderMaskedImageBlob(imgEl, ov.shape || 'rectangle', targetW, targetH);
+        const imgFileName = `overlay_pic_${i}.png`;
         await ffmpeg.writeFile(imgFileName, await fetchFile(maskedBlob));
 
         const outWithImg = `img_comp_${i}.mp4`;
         const startSec = ov.startTime;
         const endSec = ov.startTime + ov.duration;
-        const xPos = Math.round((ov.x || 30) * 10.8);
-        const yPos = Math.round((ov.y || 30) * 19.2);
+        const xPos = Math.round((ov.x !== undefined ? ov.x : 30) * 10.8);
+        const yPos = Math.round((ov.y !== undefined ? ov.y : 30) * 19.2);
 
         try {
           await ffmpeg.exec([
@@ -2512,7 +2726,7 @@ async function handleExport() {
           ]);
           currentInputVideo = outWithImg;
         } catch (imgErr) {
-          console.warn('Image overlay filter fallback:', imgErr);
+          console.warn('Picture overlay filter fallback:', imgErr);
         }
       }
     }
@@ -2630,7 +2844,7 @@ async function handleExport() {
       staff_id: currentStaffId,
       clip_sequence: videoSequence.map(c => ({ id: c.id, trimStart: c.trimStart, trimEnd: c.trimEnd })),
       text_overlays: overlays.filter(o => o.type === 'text'),
-      image_overlays: overlays.filter(o => o.type === 'image'),
+      image_overlays: overlays.filter(o => o.type === 'image' || o.type === 'overlay_clip'),
       music_track_id: selectedMusic?.id || null,
       total_duration_seconds: totalDur
     });
