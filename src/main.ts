@@ -18,7 +18,16 @@ import {
   fetchRecentExports,
   fetchExportStorageStats,
   clearAllOldExports,
-  VidhubBeatRow
+  fetchAiSettings,
+  updateAiSettings,
+  fetchStudentAiImages,
+  callAiDesignerEdgeFunction,
+  sendImageToClipBank,
+  fetchMasterAiImages,
+  toggleAiImageFlag,
+  deleteAiImage,
+  VidhubBeatRow,
+  VidhubAiImageRow
 } from './supabase';
 import { getBuiltinTracks, BuiltinTrack } from './audio_synthesizer';
 import {
@@ -110,6 +119,16 @@ let selectedItemType: 'video' | 'overlay' | null = null;
 let currentClientId = sessionStorage.getItem('vidhub_client_id') || 'demo_client';
 let currentStaffId = sessionStorage.getItem('vidhub_staff_id') || 'demo_staff';
 
+// Student Portal & AI Create State (?mode=school)
+const urlParams = new URLSearchParams(window.location.search);
+let isSchoolMode = urlParams.get('mode') === 'school' || sessionStorage.getItem('vidhub_mode') === 'school';
+let currentStudentSchoolCode = sessionStorage.getItem('vidhub_school_code') || urlParams.get('school_code') || 'SCH01';
+let currentStudentName = sessionStorage.getItem('vidhub_student_name') || urlParams.get('student_name') || currentStaffId || 'Student';
+let currentStudentPin = sessionStorage.getItem('vidhub_student_pin') || urlParams.get('pin') || '1234';
+let currentAiImageBlob: Blob | null = null;
+let currentAiImageUrl: string | null = null;
+let currentAiFilePath: string | null = null;
+
 // Teleprompter state
 let prompterStream: MediaStream | null = null;
 let prompterRecorder: MediaRecorder | null = null;
@@ -136,6 +155,14 @@ const elements = {
   btnLogin: document.getElementById('btn-login') as HTMLButtonElement,
   inputClientId: document.getElementById('input-client-id') as HTMLInputElement,
   inputStaffId: document.getElementById('input-staff-id') as HTMLInputElement,
+  tabLoginStaff: document.getElementById('tab-login-staff') as HTMLButtonElement,
+  tabLoginStudent: document.getElementById('tab-login-student') as HTMLButtonElement,
+  formLoginStaff: document.getElementById('form-login-staff') as HTMLDivElement,
+  formLoginStudent: document.getElementById('form-login-student') as HTMLDivElement,
+  inputStudentSchool: document.getElementById('input-student-school') as HTMLInputElement,
+  inputStudentName: document.getElementById('input-student-name') as HTMLInputElement,
+  inputStudentPin: document.getElementById('input-student-pin') as HTMLInputElement,
+  btnLoginStudent: document.getElementById('btn-login-student') as HTMLButtonElement,
   usageIndicator: document.getElementById('usage-indicator') as HTMLSpanElement,
   btnExport: document.getElementById('btn-export') as HTMLButtonElement,
 
@@ -263,11 +290,34 @@ const elements = {
   btnCopyExportLink: document.getElementById('btn-copy-export-link') as HTMLButtonElement,
   copyLinkBtnText: document.getElementById('copy-link-btn-text') as HTMLSpanElement,
   btnBackToEditing: document.getElementById('btn-back-to-editing') as HTMLButtonElement,
+
+  // AI Create (Phase 2)
+  toolAiCreate: document.getElementById('tool-ai-create') as HTMLButtonElement,
+  modalAiCreate: document.getElementById('modal-ai-create') as HTMLDivElement,
+  btnCloseAiCreate: document.getElementById('btn-close-ai-create') as HTMLButtonElement,
+  aiPromptInput: document.getElementById('ai-prompt-input') as HTMLTextAreaElement,
+  aiPromptCounter: document.getElementById('ai-prompt-counter') as HTMLSpanElement,
+  aiBriefSelect: document.getElementById('ai-brief-select') as HTMLSelectElement,
+  btnMakeAiPicture: document.getElementById('btn-make-ai-picture') as HTMLButtonElement,
+  btnMakeAiPictureText: document.getElementById('btn-make-ai-picture-text') as HTMLSpanElement,
+  aiQuotaDisplay: document.getElementById('ai-quota-display') as HTMLDivElement,
+  aiQuotaCount: document.getElementById('ai-quota-count') as HTMLElement,
+  aiErrorBox: document.getElementById('ai-error-box') as HTMLDivElement,
+  aiErrorMsg: document.getElementById('ai-error-msg') as HTMLParagraphElement,
+  aiResultSection: document.getElementById('ai-result-section') as HTMLDivElement,
+  aiResultImg: document.getElementById('ai-result-img') as HTMLImageElement,
+  btnUseAiImage: document.getElementById('btn-use-ai-image') as HTMLButtonElement,
+  btnSendToClipBank: document.getElementById('btn-send-to-clipbank') as HTMLButtonElement,
+  btnMakeAnotherAi: document.getElementById('btn-make-another-ai') as HTMLButtonElement,
+  aiClipbankStatus: document.getElementById('ai-clipbank-status') as HTMLDivElement,
+  myAiPicturesContainer: document.getElementById('my-ai-pictures-container') as HTMLDivElement,
+  myPicturesCount: document.getElementById('my-pictures-count') as HTMLSpanElement,
 };
 
 // --- INITIALIZATION ---
 function init() {
   checkAuth();
+  setupLoginSwitcher();
 
   // Toolbar events
   elements.btnLogin.addEventListener('click', handleLogin);
@@ -314,6 +364,9 @@ function init() {
   // Master Admin Section
   setupMasterSection();
 
+  // AI Create (Phase 2)
+  setupAiCreateSystem();
+
   // Trim tool
   elements.toolTrim.addEventListener('click', handleTrimClick);
 
@@ -353,6 +406,39 @@ function init() {
 }
 
 function checkAuth() {
+  // If ?mode=school is in URL, configure student area
+  if (isSchoolMode) {
+    sessionStorage.setItem('vidhub_mode', 'school');
+    // If student params provided in URL or session, set them
+    const pSchool = urlParams.get('school_code');
+    const pStudent = urlParams.get('student_name');
+    const pPin = urlParams.get('pin');
+    if (pSchool) {
+      currentStudentSchoolCode = pSchool;
+      sessionStorage.setItem('vidhub_school_code', pSchool);
+    }
+    if (pStudent) {
+      currentStudentName = pStudent;
+      currentStaffId = pStudent;
+      sessionStorage.setItem('vidhub_student_name', pStudent);
+      sessionStorage.setItem('vidhub_staff_id', pStudent);
+    }
+    if (pPin) {
+      currentStudentPin = pPin;
+      sessionStorage.setItem('vidhub_student_pin', pPin);
+    }
+
+    // In student mode, show AI Create button in toolbar
+    if (elements.toolAiCreate) {
+      elements.toolAiCreate.classList.remove('hidden');
+    }
+  } else {
+    // Staff and Master mode: hide AI Create button (student only in Phase 2)
+    if (elements.toolAiCreate) {
+      elements.toolAiCreate.classList.add('hidden');
+    }
+  }
+
   if (currentClientId && currentStaffId) {
     elements.loginOverlay.classList.add('hidden');
     renderTimeline();
@@ -369,9 +455,59 @@ function handleLogin() {
   const sid = elements.inputStaffId.value.trim() || 'demo_staff';
   currentClientId = cid;
   currentStaffId = sid;
+  isSchoolMode = false;
+  sessionStorage.removeItem('vidhub_mode');
   sessionStorage.setItem('vidhub_client_id', cid);
   sessionStorage.setItem('vidhub_staff_id', sid);
   checkAuth();
+}
+
+function handleStudentLogin() {
+  const school = elements.inputStudentSchool?.value.trim() || 'SCH01';
+  const name = elements.inputStudentName?.value.trim() || 'Alex Smith';
+  const pin = elements.inputStudentPin?.value.trim() || '1234';
+
+  isSchoolMode = true;
+  currentStudentSchoolCode = school;
+  currentStudentName = name;
+  currentStudentPin = pin;
+  currentClientId = school;
+  currentStaffId = name;
+
+  sessionStorage.setItem('vidhub_mode', 'school');
+  sessionStorage.setItem('vidhub_school_code', school);
+  sessionStorage.setItem('vidhub_student_name', name);
+  sessionStorage.setItem('vidhub_student_pin', pin);
+  sessionStorage.setItem('vidhub_client_id', school);
+  sessionStorage.setItem('vidhub_staff_id', name);
+
+  checkAuth();
+}
+
+function setupLoginSwitcher() {
+  elements.tabLoginStaff?.addEventListener('click', () => {
+    elements.tabLoginStaff.classList.add('bg-zinc-800', 'text-white');
+    elements.tabLoginStaff.classList.remove('text-zinc-400');
+    elements.tabLoginStudent?.classList.remove('bg-zinc-800', 'text-white');
+    elements.tabLoginStudent?.classList.add('text-zinc-400');
+    elements.formLoginStaff?.classList.remove('hidden');
+    elements.formLoginStudent?.classList.add('hidden');
+  });
+
+  elements.tabLoginStudent?.addEventListener('click', () => {
+    elements.tabLoginStudent.classList.add('bg-zinc-800', 'text-white');
+    elements.tabLoginStudent.classList.remove('text-zinc-400');
+    elements.tabLoginStaff?.classList.remove('bg-zinc-800', 'text-white');
+    elements.tabLoginStaff?.classList.add('text-zinc-400');
+    elements.formLoginStudent?.classList.remove('hidden');
+    elements.formLoginStaff?.classList.add('hidden');
+  });
+
+  elements.btnLoginStudent?.addEventListener('click', handleStudentLogin);
+
+  if (isSchoolMode) {
+    elements.tabLoginStudent?.click();
+  }
 }
 
 // --- DATA & UPLOAD ---
@@ -2399,6 +2535,325 @@ async function renderAdminDashboardTab() {
         }
       });
     });
+  } else if (currentAdminTab === 'ai_monitor') {
+    // 7. AI Monitor (Phase 2 Master Section)
+    elements.adminTabContent.innerHTML = '<div class="text-xs text-zinc-400 p-8 text-center">Loading AI Monitor data...</div>';
+
+    const [aiSettings, aiImages] = await Promise.all([
+      fetchAiSettings(),
+      fetchMasterAiImages()
+    ]);
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayImages = aiImages.filter(img => img.created_at && img.created_at.startsWith(todayStr));
+    const todayCount = todayImages.length;
+    const blockedErrorCount = aiImages.filter(img => img.status === 'blocked' || img.status === 'error').length;
+
+    // Distinct groups/schools for filter dropdown
+    const groupSet = new Set<string>();
+    aiImages.forEach(img => { if (img.school_code) groupSet.add(img.school_code); });
+    const availableGroups = Array.from(groupSet);
+
+    let html = `
+      <div class="space-y-5">
+        <!-- Top Card: vidhub_ai_settings id=1 -->
+        <div class="p-4 bg-zinc-950 border border-purple-500/30 rounded-2xl space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                <span>AI Create Controls</span>
+                <span class="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-normal">Global Settings</span>
+              </h3>
+              <p class="text-xs text-zinc-400">Control student access and daily limits</p>
+            </div>
+            <button id="btn-save-ai-settings" class="bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-xl font-bold transition-colors cursor-pointer shadow">
+              Save Settings
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            <div class="flex items-center justify-between p-3 bg-zinc-900 border border-zinc-800 rounded-xl">
+              <div>
+                <p class="text-xs font-semibold text-white">AI Create On / Off</p>
+                <p class="text-[10px] text-zinc-400">Allow students to generate images</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="ai-toggle-switch" class="sr-only peer" ${aiSettings.enabled ? 'checked' : ''}>
+                <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-zinc-900 border border-zinc-800 rounded-xl">
+              <div>
+                <p class="text-xs font-semibold text-white">Pictures per student per day</p>
+                <p class="text-[10px] text-zinc-400">Daily quota cap per student</p>
+              </div>
+              <input type="number" id="ai-daily-limit-input" min="1" max="50" value="${aiSettings.daily_limit || 5}" class="w-16 bg-zinc-950 border border-zinc-700 text-white rounded-lg px-2.5 py-1.5 text-xs text-center font-bold focus:outline-none focus:border-purple-500">
+            </div>
+          </div>
+        </div>
+
+        <!-- Metrics Row -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl">
+            <span class="text-zinc-500 block text-[10px]">Today's Pictures</span>
+            <span class="text-xl font-bold text-white">${todayCount}</span>
+          </div>
+          <div class="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl">
+            <span class="text-zinc-500 block text-[10px]">Blocked / Errors</span>
+            <span class="text-xl font-bold ${blockedErrorCount > 0 ? 'text-red-400' : 'text-zinc-400'}">${blockedErrorCount}</span>
+          </div>
+          <div class="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl">
+            <span class="text-zinc-500 block text-[10px]">Total Monitored</span>
+            <span class="text-xl font-bold text-purple-400">${aiImages.length}</span>
+          </div>
+          <div class="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl flex items-center justify-between">
+            <div>
+              <span class="text-zinc-500 block text-[10px]">Export Data</span>
+              <span class="text-xs font-bold text-zinc-300">CSV Report</span>
+            </div>
+            <button id="btn-download-ai-csv" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>CSV</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filters: All, OK, Blocked, Error, Flagged; plus school/group dropdown -->
+        <div class="flex flex-wrap items-center justify-between gap-2.5 p-3 bg-zinc-950 border border-zinc-800 rounded-xl text-xs">
+          <div class="flex flex-wrap items-center gap-1.5" id="ai-status-filters">
+            <button class="ai-filter-btn px-2.5 py-1 rounded-lg bg-purple-600 text-white font-medium cursor-pointer" data-filter="All">All</button>
+            <button class="ai-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium cursor-pointer" data-filter="ok">OK</button>
+            <button class="ai-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium cursor-pointer" data-filter="blocked">Blocked</button>
+            <button class="ai-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium cursor-pointer" data-filter="error">Error</button>
+            <button class="ai-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium cursor-pointer" data-filter="Flagged">Flagged</button>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-zinc-500 text-[11px]">Group:</span>
+            <select id="ai-group-filter-select" class="bg-zinc-900 border border-zinc-700 text-white rounded-lg px-2.5 py-1 text-xs focus:outline-none">
+              <option value="All">All Groups</option>
+              ${availableGroups.map(g => `<option value="${g}">${g}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <!-- AI Image Rows List -->
+        <div class="space-y-2.5" id="ai-images-list-container">
+    `;
+
+    if (aiImages.length === 0) {
+      html += `
+        <div class="p-8 text-center text-xs text-zinc-500 bg-zinc-950 border border-zinc-800 rounded-xl">
+          No AI pictures generated yet. Student requests and logs will appear here.
+        </div>
+      `;
+    } else {
+      aiImages.forEach(img => {
+        const timeStr = img.created_at ? new Date(img.created_at).toLocaleString() : 'Recent';
+        const isOk = img.status === 'ok';
+        const isFlagged = img.flagged === true;
+
+        html += `
+          <div class="p-3.5 bg-zinc-950 border ${isFlagged ? 'border-amber-500/60' : 'border-zinc-800'} rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs" data-row-id="${img.id}">
+            <div class="flex items-start gap-3">
+              ${isOk && img.signedUrl ? `
+                <img src="${img.signedUrl}" alt="Thumbnail" class="w-14 h-14 object-cover rounded-lg border border-zinc-700 shrink-0 bg-black cursor-pointer preview-ai-row-img" referrerpolicy="no-referrer" />
+              ` : `
+                <div class="w-14 h-14 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[10px] text-zinc-500 uppercase font-mono shrink-0">
+                  ${img.status || 'No Pic'}
+                </div>
+              `}
+              <div class="space-y-1 overflow-hidden">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-bold text-white">${img.student_name || 'Student'}</span>
+                  <span class="bg-zinc-800 text-zinc-300 text-[10px] px-2 py-0.5 rounded font-mono">${img.school_code || 'School'}</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${isOk ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : (img.status === 'blocked' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30')}">
+                    ${(img.status || 'unknown').toUpperCase()}
+                  </span>
+                  ${isFlagged ? `<span class="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] px-2 py-0.5 rounded-full font-bold">FLAGGED</span>` : ''}
+                </div>
+                <p class="text-zinc-300 font-medium line-clamp-2 italic">"${img.prompt || 'No prompt'}"</p>
+                <div class="flex items-center gap-3 text-[10px] text-zinc-500">
+                  <span>${timeStr}</span>
+                  ${img.note ? `<span class="text-zinc-400 truncate max-w-xs">• ${img.note}</span>` : ''}
+                </div>
+              </div>
+            </div>
+
+            <!-- Action buttons: Flag toggle + Delete -->
+            <div class="flex items-center gap-2 shrink-0 self-end md:self-auto">
+              <button class="btn-flag-ai-image px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${isFlagged ? 'bg-amber-600 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'}" data-id="${img.id}" data-flagged="${isFlagged}">
+                ${isFlagged ? 'Unflag' : 'Flag'}
+              </button>
+              <button class="btn-delete-ai-image px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-red-600 hover:text-white text-zinc-400 text-xs font-medium transition-colors cursor-pointer" data-id="${img.id}" data-path="${img.file_path || ''}">
+                Delete
+              </button>
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    html += `</div></div>`;
+    elements.adminTabContent.innerHTML = html;
+
+    // Attach Save Settings handler
+    const btnSaveSettings = elements.adminTabContent.querySelector('#btn-save-ai-settings') as HTMLButtonElement | null;
+    btnSaveSettings?.addEventListener('click', async () => {
+      const toggle = (elements.adminTabContent.querySelector('#ai-toggle-switch') as HTMLInputElement)?.checked ?? true;
+      const limitInput = (elements.adminTabContent.querySelector('#ai-daily-limit-input') as HTMLInputElement)?.value;
+      const limit = parseInt(limitInput || '5', 10);
+      btnSaveSettings.disabled = true;
+      btnSaveSettings.textContent = 'Saving...';
+      const ok = await updateAiSettings(toggle, limit);
+      btnSaveSettings.disabled = false;
+      btnSaveSettings.textContent = ok ? 'Saved!' : 'Failed';
+      setTimeout(() => { btnSaveSettings.textContent = 'Save Settings'; }, 2000);
+    });
+
+    // Attach CSV Download handler
+    const btnCsv = elements.adminTabContent.querySelector('#btn-download-ai-csv') as HTMLButtonElement | null;
+    btnCsv?.addEventListener('click', () => {
+      let csv = 'ID,Created At,School Code,Student Name,Prompt,Status,Note,Flagged,File Path\n';
+      aiImages.forEach(r => {
+        const cleanPrompt = (r.prompt || '').replace(/"/g, '""');
+        const cleanNote = (r.note || '').replace(/"/g, '""');
+        csv += `"${r.id}","${r.created_at || ''}","${r.school_code || ''}","${r.student_name || ''}","${cleanPrompt}","${r.status || ''}","${cleanNote}","${r.flagged ? 'TRUE' : 'FALSE'}","${r.file_path || ''}"\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ai_monitor_log_${todayStr}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Attach Flag button handlers
+    elements.adminTabContent.querySelectorAll('.btn-flag-ai-image').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        const flagged = btn.getAttribute('data-flagged') === 'true';
+        if (id) {
+          await toggleAiImageFlag(id, flagged);
+          renderAdminDashboardTab();
+        }
+      });
+    });
+
+    // Attach Delete button handlers
+    elements.adminTabContent.querySelectorAll('.btn-delete-ai-image').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        const path = btn.getAttribute('data-path');
+        if (id && confirm('Delete this image log and file from storage?')) {
+          await deleteAiImage(id, path);
+          renderAdminDashboardTab();
+        }
+      });
+    });
+
+    // Attach Filter handlers
+    let currentFilterStatus = 'All';
+    let currentFilterGroup = 'All';
+
+    const filterBtns = elements.adminTabContent.querySelectorAll('.ai-filter-btn');
+    const groupSelect = elements.adminTabContent.querySelector('#ai-group-filter-select') as HTMLSelectElement | null;
+
+    const applyFilters = async () => {
+      const filtered = await fetchMasterAiImages(currentFilterStatus, currentFilterGroup);
+      const listContainer = elements.adminTabContent.querySelector('#ai-images-list-container');
+      if (!listContainer) return;
+
+      if (filtered.length === 0) {
+        listContainer.innerHTML = '<div class="p-8 text-center text-xs text-zinc-500 bg-zinc-950 border border-zinc-800 rounded-xl">No matching images found for this filter.</div>';
+        return;
+      }
+
+      let subHtml = '';
+      filtered.forEach(img => {
+        const timeStr = img.created_at ? new Date(img.created_at).toLocaleString() : 'Recent';
+        const isOk = img.status === 'ok';
+        const isFlagged = img.flagged === true;
+        subHtml += `
+          <div class="p-3.5 bg-zinc-950 border ${isFlagged ? 'border-amber-500/60' : 'border-zinc-800'} rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs" data-row-id="${img.id}">
+            <div class="flex items-start gap-3">
+              ${isOk && img.signedUrl ? `
+                <img src="${img.signedUrl}" alt="Thumbnail" class="w-14 h-14 object-cover rounded-lg border border-zinc-700 shrink-0 bg-black cursor-pointer preview-ai-row-img" referrerpolicy="no-referrer" />
+              ` : `
+                <div class="w-14 h-14 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[10px] text-zinc-500 uppercase font-mono shrink-0">
+                  ${img.status || 'No Pic'}
+                </div>
+              `}
+              <div class="space-y-1 overflow-hidden">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-bold text-white">${img.student_name || 'Student'}</span>
+                  <span class="bg-zinc-800 text-zinc-300 text-[10px] px-2 py-0.5 rounded font-mono">${img.school_code || 'School'}</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${isOk ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : (img.status === 'blocked' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30')}">
+                    ${(img.status || 'unknown').toUpperCase()}
+                  </span>
+                  ${isFlagged ? `<span class="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] px-2 py-0.5 rounded-full font-bold">FLAGGED</span>` : ''}
+                </div>
+                <p class="text-zinc-300 font-medium line-clamp-2 italic">"${img.prompt || 'No prompt'}"</p>
+                <div class="flex items-center gap-3 text-[10px] text-zinc-500">
+                  <span>${timeStr}</span>
+                  ${img.note ? `<span class="text-zinc-400 truncate max-w-xs">• ${img.note}</span>` : ''}
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0 self-end md:self-auto">
+              <button class="btn-flag-ai-image px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${isFlagged ? 'bg-amber-600 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'}" data-id="${img.id}" data-flagged="${isFlagged}">
+                ${isFlagged ? 'Unflag' : 'Flag'}
+              </button>
+              <button class="btn-delete-ai-image px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-red-600 hover:text-white text-zinc-400 text-xs font-medium transition-colors cursor-pointer" data-id="${img.id}" data-path="${img.file_path || ''}">
+                Delete
+              </button>
+            </div>
+          </div>
+        `;
+      });
+      listContainer.innerHTML = subHtml;
+
+      // Re-bind flag & delete
+      listContainer.querySelectorAll('.btn-flag-ai-image').forEach(b => {
+        b.addEventListener('click', async () => {
+          const id = b.getAttribute('data-id');
+          const flg = b.getAttribute('data-flagged') === 'true';
+          if (id) {
+            await toggleAiImageFlag(id, flg);
+            applyFilters();
+          }
+        });
+      });
+      listContainer.querySelectorAll('.btn-delete-ai-image').forEach(b => {
+        b.addEventListener('click', async () => {
+          const id = b.getAttribute('data-id');
+          const pth = b.getAttribute('data-path');
+          if (id && confirm('Delete this image log?')) {
+            await deleteAiImage(id, pth);
+            applyFilters();
+          }
+        });
+      });
+    };
+
+    filterBtns.forEach(fb => {
+      fb.addEventListener('click', () => {
+        filterBtns.forEach(b => {
+          b.classList.remove('bg-purple-600', 'text-white');
+          b.classList.add('bg-zinc-800', 'text-zinc-300');
+        });
+        fb.classList.remove('bg-zinc-800', 'text-zinc-300');
+        fb.classList.add('bg-purple-600', 'text-white');
+        currentFilterStatus = fb.getAttribute('data-filter') || 'All';
+        applyFilters();
+      });
+    });
+
+    groupSelect?.addEventListener('change', () => {
+      currentFilterGroup = groupSelect.value;
+      applyFilters();
+    });
   }
 }
 
@@ -2414,7 +2869,274 @@ async function handleAdminBeatUpload(e: Event) {
   target.value = '';
 }
 
-// --- TRANSITIONS MODAL ---
+// --- ITEM 6: AI CREATE (PHASE 2 - STUDENT PORTAL) ---
+function setupAiCreateSystem() {
+  if (!elements.toolAiCreate) return;
+
+  // Open modal
+  elements.toolAiCreate.addEventListener('click', () => {
+    openAiCreateModal();
+  });
+
+  // Close modal
+  elements.btnCloseAiCreate?.addEventListener('click', () => {
+    elements.modalAiCreate.classList.add('hidden');
+  });
+
+  // Prompt counter
+  elements.aiPromptInput?.addEventListener('input', () => {
+    const len = elements.aiPromptInput.value.length;
+    if (elements.aiPromptCounter) {
+      elements.aiPromptCounter.textContent = `${len}/300`;
+    }
+  });
+
+  // Helper chips
+  const helperChips = document.querySelectorAll('.ai-helper-chip');
+  helperChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      const txt = chip.getAttribute('data-text') || '';
+      if (!txt) return;
+      const cur = elements.aiPromptInput.value.trim();
+      if (cur) {
+        elements.aiPromptInput.value = `${cur}, ${txt}`.slice(0, 300);
+      } else {
+        elements.aiPromptInput.value = txt;
+      }
+      elements.aiPromptCounter.textContent = `${elements.aiPromptInput.value.length}/300`;
+      elements.aiPromptInput.focus();
+    });
+  });
+
+  // Make my picture button
+  elements.btnMakeAiPicture?.addEventListener('click', handleGenerateAiPicture);
+
+  // "Use in my video"
+  elements.btnUseAiImage?.addEventListener('click', handleUseAiImageInVideo);
+
+  // "Send to Clip Bank"
+  elements.btnSendToClipBank?.addEventListener('click', handleSendAiImageToClipBank);
+
+  // "Make another"
+  elements.btnMakeAnotherAi?.addEventListener('click', () => {
+    elements.aiPromptInput.value = '';
+    elements.aiPromptCounter.textContent = '0/300';
+    elements.aiResultSection.classList.add('hidden');
+    elements.aiErrorBox.classList.add('hidden');
+    elements.aiClipbankStatus.classList.add('hidden');
+  });
+}
+
+async function openAiCreateModal() {
+  elements.modalAiCreate.classList.remove('hidden');
+  elements.aiErrorBox.classList.add('hidden');
+  elements.aiClipbankStatus.classList.add('hidden');
+  elements.aiPromptInput.focus();
+
+  // Load student's past pictures
+  refreshMyAiPictures();
+}
+
+async function refreshMyAiPictures() {
+  if (!elements.myAiPicturesContainer) return;
+  const schoolCode = currentStudentSchoolCode || 'SCH01';
+  const studentName = currentStudentName || currentStaffId || 'Student';
+
+  const pictures = await fetchStudentAiImages(schoolCode, studentName);
+  elements.myPicturesCount.textContent = `${pictures.length} saved`;
+
+  if (pictures.length === 0) {
+    elements.myAiPicturesContainer.innerHTML = '<p class="text-[11px] text-zinc-500 py-3">No AI pictures generated yet.</p>';
+    return;
+  }
+
+  elements.myAiPicturesContainer.innerHTML = '';
+  pictures.forEach(pic => {
+    const url = pic.signedUrl;
+    if (!url) return;
+
+    const thumb = document.createElement('div');
+    thumb.className = 'w-16 h-16 rounded-xl border border-zinc-700/80 overflow-hidden shrink-0 bg-black cursor-pointer hover:border-purple-400 transition-all hover:scale-105 relative group';
+    thumb.innerHTML = `
+      <img src="${url}" alt="My AI Picture" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
+      <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="text-white"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+      </div>
+    `;
+
+    thumb.addEventListener('click', () => {
+      currentAiImageUrl = url;
+      currentAiFilePath = pic.file_path || null;
+      elements.aiResultImg.src = url;
+      elements.aiResultSection.classList.remove('hidden');
+      elements.aiResultSection.scrollIntoView({ behavior: 'smooth' });
+    });
+
+    elements.myAiPicturesContainer.appendChild(thumb);
+  });
+}
+
+async function handleGenerateAiPicture() {
+  const prompt = elements.aiPromptInput.value.trim();
+  if (!prompt) {
+    showAiError("Please type a description of the picture you want.");
+    return;
+  }
+
+  // UI state: working
+  elements.btnMakeAiPicture.disabled = true;
+  elements.btnMakeAiPictureText.textContent = "Making... this can take 20 seconds";
+  elements.aiErrorBox.classList.add('hidden');
+  elements.aiClipbankStatus.classList.add('hidden');
+
+  const schoolCode = currentStudentSchoolCode || 'SCH01';
+  const studentName = currentStudentName || currentStaffId || 'Student';
+  const pin = currentStudentPin || '1234';
+
+  try {
+    // 1. Call the Supabase Edge Function 'ai-designer'
+    const result = await callAiDesignerEdgeFunction({
+      school_code: schoolCode,
+      full_name: studentName,
+      pin: pin,
+      prompt: prompt
+    });
+
+    if (result.error) {
+      // Friendly red box
+      showAiError(result.error);
+
+      // If status 429, also hide the button until tomorrow
+      if (result.status === 429) {
+        elements.btnMakeAiPicture.classList.add('hidden');
+      }
+
+      // If Edge Function returned 404 (not deployed yet to Supabase project), inform gracefully
+      if (result.status === 404) {
+        showAiError(`Supabase Edge Function "ai-designer" returned 404. Once deployed to your Supabase project (habfyuqbvrfdswsxjnfv), this button will generate directly from the edge.`);
+      }
+      return;
+    }
+
+    // Success response: { url, file_path, used, limit, remaining }
+    currentAiImageUrl = result.url || null;
+    currentAiFilePath = result.file_path || null;
+
+    // Show quota: "Pictures left today: X of Y"
+    if (result.limit !== undefined && result.remaining !== undefined) {
+      elements.aiQuotaDisplay.classList.remove('hidden');
+      elements.aiQuotaCount.textContent = `${result.remaining} of ${result.limit}`;
+    }
+
+    if (result.url) {
+      elements.aiResultImg.src = result.url;
+      elements.aiResultSection.classList.remove('hidden');
+      elements.aiResultSection.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // Refresh history
+    refreshMyAiPictures();
+
+  } catch (err: any) {
+    showAiError(err?.message || "An unexpected error occurred. Please try again.");
+  } finally {
+    elements.btnMakeAiPicture.disabled = false;
+    elements.btnMakeAiPictureText.textContent = "Make my picture";
+  }
+}
+
+function showAiError(msg: string) {
+  elements.aiErrorBox.classList.remove('hidden');
+  elements.aiErrorMsg.textContent = msg;
+}
+
+async function handleUseAiImageInVideo() {
+  if (!currentAiImageUrl && !elements.aiResultImg.src) return;
+  const imgUrl = currentAiImageUrl || elements.aiResultImg.src;
+
+  try {
+    elements.btnUseAiImage.disabled = true;
+    elements.btnUseAiImage.textContent = "Adding to video...";
+
+    // Fetch the signed url and convert to a Blob
+    const resp = await fetch(imgUrl);
+    const blob = await resp.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    const totalDur = getTotalDuration();
+    const initDur = totalDur > 0 ? Math.min(4, Math.max(0.5, totalDur - currentGlobalTime)) : 4;
+
+    const imgOverlay: OverlayClip = {
+      id: `ai_img_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      type: 'image',
+      file: blob,
+      content: objectUrl,
+      shape: 'rectangle',
+      startTime: currentGlobalTime,
+      duration: Math.max(0.5, initDur),
+      x: 25,
+      y: 25,
+      width: 50,
+      height: 50
+    };
+
+    overlays.push(imgOverlay);
+    selectItem(imgOverlay.id, 'overlay');
+    renderTimeline();
+    updatePlayheadAndPreview();
+
+    elements.modalAiCreate.classList.add('hidden');
+  } catch (err: any) {
+    alert("Could not load image into timeline: " + err.message);
+  } finally {
+    elements.btnUseAiImage.disabled = false;
+    elements.btnUseAiImage.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+      <span>Use in my video</span>
+    `;
+  }
+}
+
+async function handleSendAiImageToClipBank() {
+  if (!currentAiImageUrl && !elements.aiResultImg.src) return;
+  const imgUrl = currentAiImageUrl || elements.aiResultImg.src;
+
+  try {
+    elements.btnSendToClipBank.disabled = true;
+    elements.btnSendToClipBank.textContent = "Sending to Clip Bank...";
+
+    const resp = await fetch(imgUrl);
+    const blob = await resp.blob();
+
+    const selectedBrief = elements.aiBriefSelect?.value || 'general';
+    const schoolCode = currentStudentSchoolCode || 'SCH01';
+    const studentName = currentStudentName || currentStaffId || 'Student';
+
+    const res = await sendImageToClipBank({
+      schoolCode,
+      studentName,
+      imageBlob: blob,
+      brief: selectedBrief,
+      businessName: 'Student Business'
+    });
+
+    if (res.success) {
+      elements.aiClipbankStatus.classList.remove('hidden');
+      elements.aiClipbankStatus.textContent = "Saved to Clip Bank successfully!";
+      setTimeout(() => { elements.aiClipbankStatus.classList.add('hidden'); }, 3000);
+    } else {
+      showAiError("Could not send to Clip Bank: " + (res.error || "Storage error"));
+    }
+  } catch (err: any) {
+    showAiError("Failed to save to Clip Bank: " + err.message);
+  } finally {
+    elements.btnSendToClipBank.disabled = false;
+    elements.btnSendToClipBank.innerHTML = `
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <span>Send to Clip Bank</span>
+    `;
+  }
+}
 function setupTransitionControls() {
   elements.toolTransition.addEventListener('click', openTransitionModal);
   elements.btnCloseTransition.addEventListener('click', () => elements.modalTransition.classList.add('hidden'));

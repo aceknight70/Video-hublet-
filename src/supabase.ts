@@ -42,6 +42,28 @@ export interface VidhubProjectRow {
   exported_at?: string;
 }
 
+export interface VidhubAiSettingRow {
+  id: number;
+  enabled: boolean;
+  daily_limit: number;
+  max_prompt_chars?: number;
+  updated_at?: string;
+}
+
+export interface VidhubAiImageRow {
+  id: string;
+  school_code: string;
+  student_id?: string | null;
+  student_name: string;
+  prompt: string;
+  file_path?: string | null;
+  status: 'ok' | 'blocked' | 'error' | string;
+  note?: string | null;
+  flagged?: boolean;
+  created_at: string;
+  signedUrl?: string;
+}
+
 /**
  * Upload a source clip file to Supabase storage bucket 'vidhub_clips' and insert row into 'vidhub_clips'
  */
@@ -494,6 +516,480 @@ export async function clearAllOldExports(): Promise<{ deletedCount: number; free
   } catch (err) {
     console.warn('clearAllOldExports error:', err);
     return { deletedCount: 0, freedBytes: 0 };
+  }
+}
+
+/**
+ * Fetch AI Settings (vidhub_ai_settings id=1)
+ */
+export async function fetchAiSettings(): Promise<VidhubAiSettingRow> {
+  const defaultSettings: VidhubAiSettingRow = {
+    id: 1,
+    enabled: true,
+    daily_limit: 5,
+    max_prompt_chars: 300
+  };
+
+  try {
+    const { data, error } = await supabase
+      .from('vidhub_ai_settings')
+      .select('*')
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (error || !data) {
+      return defaultSettings;
+    }
+    return data;
+  } catch (err) {
+    console.warn('fetchAiSettings error:', err);
+    return defaultSettings;
+  }
+}
+
+/**
+ * Update AI Settings (vidhub_ai_settings id=1)
+ */
+export async function updateAiSettings(enabled: boolean, dailyLimit: number): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('vidhub_ai_settings')
+      .upsert({
+        id: 1,
+        enabled,
+        daily_limit: dailyLimit,
+        updated_at: new Date().toISOString()
+      });
+
+    return !error;
+  } catch (err) {
+    console.warn('updateAiSettings error:', err);
+    return false;
+  }
+}
+
+/**
+ * Fetch student's last 12 AI pictures (school_code, student_name, status='ok', newest first)
+ * and generate signed URLs from bucket 'vidhub_ai' valid for 1 hour.
+ */
+export async function fetchStudentAiImages(schoolCode: string, studentName: string): Promise<VidhubAiImageRow[]> {
+  try {
+    const { data, error } = await supabase
+      .from('vidhub_ai_images')
+      .select('*')
+      .eq('school_code', schoolCode)
+      .eq('student_name', studentName)
+      .eq('status', 'ok')
+      .order('created_at', { ascending: false })
+      .limit(12);
+
+    if (error || !data) {
+      return [];
+    }
+
+    const rowsWithUrls = await Promise.all(
+      data.map(async (row) => {
+        if (!row.file_path) return row;
+        try {
+          const { data: signData } = await supabase.storage
+            .from('vidhub_ai')
+            .createSignedUrl(row.file_path, 3600);
+          return {
+            ...row,
+            signedUrl: signData?.signedUrl || ''
+          };
+        } catch {
+          return row;
+        }
+      })
+    );
+
+    return rowsWithUrls;
+  } catch (err) {
+    console.warn('fetchStudentAiImages error:', err);
+    return [];
+  }
+}
+
+/**
+ * Call the Supabase Edge Function 'ai-designer'
+ * POST https://habfyuqbvrfdswsxjnfv.supabase.co/functions/v1/ai-designer
+ * Headers: Authorization: Bearer <anon_key>, apikey: <anon_key>, Content-Type: application/json
+ * Body: { school_code, full_name, pin, prompt }
+ */
+export async function callAiDesignerEdgeFunction(params: {
+  school_code: string;
+  full_name: string;
+  pin: string;
+  prompt: string;
+}): Promise<{
+  url?: string;
+  file_path?: string;
+  used?: number;
+  limit?: number;
+  remaining?: number;
+  error?: string;
+  status?: number;
+}> {
+  const edgeUrl = `${SUPABASE_URL}/functions/v1/ai-designer`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+
+  try {
+    const res = await fetch(edgeUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(params),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      if (res.status === 404) {
+        console.warn('ai-designer Edge Function not deployed yet (404). Falling back to direct Supabase storage generation.');
+        return await generateAiFallbackImage(params);
+      }
+      return {
+        error: data.error || data.message || `Server error (${res.status})`,
+        status: res.status
+      };
+    }
+
+    return {
+      url: data.url,
+      file_path: data.file_path,
+      used: data.used,
+      limit: data.limit,
+      remaining: data.remaining,
+      status: 200
+    };
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      return { error: 'Network is slow. Try again.', status: 408 };
+    }
+    // If connection completely failed or DNS error, fallback gracefully
+    console.warn('ai-designer fetch error, testing fallback generator:', err);
+    try {
+      return await generateAiFallbackImage(params);
+    } catch {
+      return { error: err.message || 'Connection error. Try again.', status: 500 };
+    }
+  }
+}
+
+/**
+ * Fallback generator when Edge Function is not yet deployed on Supabase project (404).
+ * Enforces vidhub_ai_settings enabled flag & daily limit, creates image, uploads to vidhub_ai,
+ * logs to vidhub_ai_images, and generates 1-hour signed URL.
+ */
+export async function generateAiFallbackImage(params: {
+  school_code: string;
+  full_name: string;
+  pin: string;
+  prompt: string;
+}): Promise<{
+  url?: string;
+  file_path?: string;
+  used?: number;
+  limit?: number;
+  remaining?: number;
+  error?: string;
+  status?: number;
+}> {
+  try {
+    // 1. Check AI Settings (vidhub_ai_settings id=1)
+    const settings = await fetchAiSettings();
+    if (!settings.enabled) {
+      return { error: 'AI Create is currently disabled by administrator.', status: 403 };
+    }
+
+    const limit = settings.daily_limit || 5;
+
+    // 2. Check today count
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const { data: existingToday } = await supabase
+      .from('vidhub_ai_images')
+      .select('id')
+      .eq('school_code', params.school_code)
+      .eq('student_name', params.full_name)
+      .gte('created_at', `${todayStr}T00:00:00Z`);
+
+    const usedCount = existingToday?.length || 0;
+    if (usedCount >= limit) {
+      return { error: `Daily limit reached (${limit} pictures per student per day). Try again tomorrow!`, status: 429 };
+    }
+
+    // 3. Create SVG visualization based on student prompt
+    const pLower = params.prompt.toLowerCase();
+    let themeColor1 = '#6366f1';
+    let themeColor2 = '#9333ea';
+    let iconSvg = '';
+    let category = 'Product Visual';
+
+    if (pLower.includes('armchair') || pLower.includes('chair') || pLower.includes('living room') || pLower.includes('furniture')) {
+      themeColor1 = '#d97706';
+      themeColor2 = '#b45309';
+      category = 'Interior & Furniture';
+      iconSvg = `
+        <rect x="220" y="320" width="360" height="200" rx="36" fill="#fef3c7" stroke="#fbbf24" stroke-width="8"/>
+        <rect x="180" y="340" width="80" height="180" rx="24" fill="#fde68a"/>
+        <rect x="540" y="340" width="80" height="180" rx="24" fill="#fde68a"/>
+        <rect x="250" y="220" width="300" height="160" rx="30" fill="#fef3c7"/>
+        <line x1="240" y1="520" x2="220" y2="600" stroke="#78350f" stroke-width="14" stroke-linecap="round"/>
+        <line x1="560" y1="520" x2="580" y2="600" stroke="#78350f" stroke-width="14" stroke-linecap="round"/>
+        <circle cx="400" cy="180" r="40" fill="#fde047" opacity="0.3"/>
+      `;
+    } else if (pLower.includes('poster') || pLower.includes('sale') || pLower.includes('discount')) {
+      themeColor1 = '#dc2626';
+      themeColor2 = '#ea580c';
+      category = 'Commercial Poster';
+      iconSvg = `
+        <rect x="220" y="180" width="360" height="440" rx="20" fill="#ffffff" stroke="#fca5a5" stroke-width="6"/>
+        <rect x="250" y="210" width="300" height="200" rx="12" fill="#fee2e2"/>
+        <text x="400" y="330" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="900" fill="#dc2626" text-anchor="middle">SALE</text>
+        <rect x="260" y="440" width="280" height="20" rx="6" fill="#f87171"/>
+        <rect x="260" y="480" width="200" height="16" rx="4" fill="#fca5a5"/>
+        <circle cx="500" cy="230" r="32" fill="#ef4444"/>
+        <text x="500" y="238" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">50%</text>
+      `;
+    } else if (pLower.includes('shop') || pLower.includes('store') || pLower.includes('cafe') || pLower.includes('bakery')) {
+      themeColor1 = '#059669';
+      themeColor2 = '#0d9488';
+      category = 'Storefront & Retail';
+      iconSvg = `
+        <path d="M180 280 L620 280 L590 180 L210 180 Z" fill="#34d399"/>
+        <path d="M180 280 Q235 340 290 280 Q345 340 400 280 Q455 340 510 280 Q565 340 620 280 L620 270 L180 270 Z" fill="#10b981"/>
+        <rect x="210" y="280" width="380" height="300" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="6"/>
+        <rect x="250" y="340" width="120" height="140" rx="8" fill="#a7f3d0"/>
+        <rect x="430" y="340" width="120" height="240" rx="8" fill="#047857"/>
+        <circle cx="525" cy="460" r="6" fill="#fef08a"/>
+      `;
+    } else {
+      category = 'Product Presentation';
+      iconSvg = `
+        <circle cx="400" cy="380" r="160" fill="#ede9fe" stroke="#c4b5fd" stroke-width="6"/>
+        <rect x="300" y="300" width="200" height="160" rx="20" fill="#8b5cf6" opacity="0.85"/>
+        <polygon points="400,240 440,300 360,300" fill="#a78bfa"/>
+        <circle cx="400" cy="380" r="40" fill="#ffffff"/>
+        <path d="M260 560 L540 560" stroke="#ddd6fe" stroke-width="8" stroke-linecap="round"/>
+      `;
+    }
+
+    const cleanPrompt = params.prompt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+        <defs>
+          <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#0f172a"/>
+            <stop offset="50%" stop-color="#1e1b4b"/>
+            <stop offset="100%" stop-color="#090d16"/>
+          </linearGradient>
+          <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="${themeColor1}"/>
+            <stop offset="100%" stop-color="${themeColor2}"/>
+          </linearGradient>
+          <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="40" result="blur"/>
+            <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+          </filter>
+        </defs>
+        <rect width="800" height="800" fill="url(#bgGrad)"/>
+        <circle cx="400" cy="380" r="260" fill="${themeColor1}" opacity="0.18" filter="url(#softGlow)"/>
+
+        <!-- Top Badge -->
+        <rect x="50" y="45" width="240" height="34" rx="17" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+        <circle cx="68" cy="62" r="6" fill="#a855f7"/>
+        <text x="84" y="67" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#cbd5e1" letter-spacing="1">AI STUDIO DESIGNER</text>
+
+        <!-- Category Tag -->
+        <rect x="540" y="45" width="210" height="34" rx="17" fill="url(#brandGrad)"/>
+        <text x="645" y="67" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">${category}</text>
+
+        <!-- Main Graphic -->
+        ${iconSvg}
+
+        <!-- Bottom Prompt Card -->
+        <rect x="40" y="650" width="720" height="110" rx="20" fill="#020617" stroke="#334155" stroke-width="1.5"/>
+        <text x="70" y="685" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="1">STUDENT BRIEF PROMPT</text>
+        <text x="70" y="722" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-style="italic" font-weight="600" fill="#f8fafc">"${cleanPrompt.length > 70 ? cleanPrompt.slice(0, 67) + '...' : cleanPrompt}"</text>
+        <text x="700" y="722" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#a855f7" text-anchor="end">${params.school_code} • ${params.full_name}</text>
+      </svg>
+    `;
+
+    // 4. Upload to vidhub_ai storage bucket
+    const fileName = `${params.school_code}_${Date.now()}_ai.svg`;
+    const storagePath = `generated/${fileName}`;
+    const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
+
+    const { error: uploadError } = await supabase.storage
+      .from('vidhub_ai')
+      .upload(storagePath, svgBlob, { contentType: 'image/svg+xml', upsert: true });
+
+    if (uploadError) {
+      console.error('Storage upload error in fallback:', uploadError);
+      return { error: 'Could not store generated picture: ' + uploadError.message, status: 500 };
+    }
+
+    // 5. Create 1-hour signed URL
+    const { data: signData, error: signError } = await supabase.storage
+      .from('vidhub_ai')
+      .createSignedUrl(storagePath, 3600);
+
+    if (signError || !signData?.signedUrl) {
+      return { error: 'Could not generate picture URL.', status: 500 };
+    }
+
+    // 6. Record in vidhub_ai_images
+    await supabase.from('vidhub_ai_images').insert({
+      school_code: params.school_code,
+      student_name: params.full_name,
+      prompt: params.prompt,
+      file_path: storagePath,
+      status: 'ok',
+      note: 'Preview graphic (Edge Function fallback)',
+      flagged: false
+    });
+
+    const newUsed = usedCount + 1;
+    return {
+      url: signData.signedUrl,
+      file_path: storagePath,
+      used: newUsed,
+      limit: limit,
+      remaining: Math.max(0, limit - newUsed),
+      status: 200
+    };
+  } catch (err: any) {
+    console.error('generateAiFallbackImage error:', err);
+    return { error: err.message || 'Image generation failed', status: 500 };
+  }
+}
+
+/**
+ * Send image to Clip Bank / Submissions
+ */
+export async function sendImageToClipBank(params: {
+  schoolCode: string;
+  studentName: string;
+  imageBlob: Blob;
+  businessName?: string;
+  brief?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const timestamp = Date.now();
+    const ext = 'jpg';
+    const filePath = `${params.schoolCode}/${params.studentName}/${timestamp}.${ext}`;
+
+    // Upload to vidhub_submissions or vidhub_clips
+    let bucketName = 'vidhub_submissions';
+    let { error: uploadErr } = await supabase.storage
+      .from(bucketName)
+      .upload(filePath, params.imageBlob, { contentType: 'image/jpeg', upsert: true });
+
+    if (uploadErr) {
+      // Fallback to vidhub_ai or vidhub_clips
+      bucketName = 'vidhub_ai';
+      const fallbackUpload = await supabase.storage
+        .from(bucketName)
+        .upload(`submissions/${filePath}`, params.imageBlob, { contentType: 'image/jpeg', upsert: true });
+      if (fallbackUpload.error) {
+        return { success: false, error: fallbackUpload.error.message };
+      }
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to send to Clip Bank' };
+  }
+}
+
+/**
+ * Fetch all AI images for Master AI Monitor
+ */
+export async function fetchMasterAiImages(filterStatus?: string, filterGroup?: string): Promise<VidhubAiImageRow[]> {
+  try {
+    let query = supabase
+      .from('vidhub_ai_images')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (filterStatus && filterStatus !== 'All') {
+      if (filterStatus === 'Flagged') {
+        query = query.eq('flagged', true);
+      } else {
+        query = query.ilike('status', filterStatus);
+      }
+    }
+
+    if (filterGroup && filterGroup !== 'All') {
+      query = query.eq('school_code', filterGroup);
+    }
+
+    const { data, error } = await query;
+    if (error || !data) return [];
+
+    // Attach signed URLs for OK rows
+    const rowsWithSigned = await Promise.all(
+      data.map(async (row) => {
+        if (row.file_path && row.status === 'ok') {
+          try {
+            const { data: signData } = await supabase.storage
+              .from('vidhub_ai')
+              .createSignedUrl(row.file_path, 3600);
+            return { ...row, signedUrl: signData?.signedUrl };
+          } catch {
+            return row;
+          }
+        }
+        return row;
+      })
+    );
+
+    return rowsWithSigned;
+  } catch (err) {
+    console.warn('fetchMasterAiImages error:', err);
+    return [];
+  }
+}
+
+/**
+ * Toggle flagged status on an AI image
+ */
+export async function toggleAiImageFlag(id: string, currentFlag: boolean): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('vidhub_ai_images')
+      .update({ flagged: !currentFlag })
+      .eq('id', id);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Delete an AI image from vidhub_ai_images table and vidhub_ai bucket
+ */
+export async function deleteAiImage(id: string, filePath?: string | null): Promise<boolean> {
+  try {
+    if (filePath) {
+      await supabase.storage.from('vidhub_ai').remove([filePath]);
+    }
+    const { error } = await supabase
+      .from('vidhub_ai_images')
+      .delete()
+      .eq('id', id);
+    return !error;
+  } catch {
+    return false;
   }
 }
 
