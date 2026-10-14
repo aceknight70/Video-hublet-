@@ -722,18 +722,57 @@ export async function generateAiFallbackImage(params: {
       .gte('created_at', `${todayStr}T00:00:00Z`);
 
     const usedCount = existingToday?.length || 0;
-    if (usedCount >= limit) {
+    const isStudentSchool = params.school_code && params.school_code.startsWith('SCH');
+    if (isStudentSchool && usedCount >= limit) {
       return { error: `Daily limit reached (${limit} pictures per student per day). Try again tomorrow!`, status: 429 };
     }
 
-    // 3. Create SVG visualization based on student prompt
+    // 3. Create SVG visualization based on user prompt
     const pLower = params.prompt.toLowerCase();
     let themeColor1 = '#6366f1';
     let themeColor2 = '#9333ea';
     let iconSvg = '';
     let category = 'Product Visual';
 
-    if (pLower.includes('armchair') || pLower.includes('chair') || pLower.includes('living room') || pLower.includes('furniture')) {
+    if (pLower.includes('sneaker') || pLower.includes('shoe') || pLower.includes('kicks') || pLower.includes('streetwear') || pLower.includes('fashion')) {
+      themeColor1 = '#f43f5e';
+      themeColor2 = '#8b5cf6';
+      category = 'Streetwear & Kicks';
+      iconSvg = `
+        <ellipse cx="400" cy="520" rx="260" ry="24" fill="#000000" opacity="0.6"/>
+        <path d="M220 480 C260 480 300 450 360 430 C410 410 460 360 520 320 C540 305 570 315 580 335 L620 410 C630 430 625 455 605 470 C570 495 510 500 240 500 Z" fill="#ffffff" stroke="#f43f5e" stroke-width="8"/>
+        <path d="M230 490 L610 490 L600 520 L240 520 Z" fill="#8b5cf6"/>
+        <path d="M340 435 C380 410 420 395 480 390" stroke="#f43f5e" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <circle cx="530" cy="360" r="12" fill="#ec4899"/>
+        <path d="M260 440 L310 440" stroke="#8b5cf6" stroke-width="6" stroke-linecap="round"/>
+      `;
+    } else if (pLower.includes('gym') || pLower.includes('fitness') || pLower.includes('workout') || pLower.includes('muscle')) {
+      themeColor1 = '#06b6d4';
+      themeColor2 = '#3b82f6';
+      category = 'Fitness & Energy';
+      iconSvg = `
+        <rect x="180" y="380" width="440" height="40" rx="20" fill="#94a3b8"/>
+        <rect x="220" y="330" width="50" height="140" rx="16" fill="#38bdf8" stroke="#0284c7" stroke-width="6"/>
+        <rect x="280" y="350" width="35" height="100" rx="12" fill="#0ea5e9"/>
+        <rect x="530" y="330" width="50" height="140" rx="16" fill="#38bdf8" stroke="#0284c7" stroke-width="6"/>
+        <rect x="485" y="350" width="35" height="100" rx="12" fill="#0ea5e9"/>
+        <circle cx="400" cy="240" r="60" fill="#0284c7" opacity="0.2"/>
+        <polygon points="400,200 420,240 380,240" fill="#38bdf8"/>
+      `;
+    } else if (pLower.includes('coffee') || pLower.includes('cafe') || pLower.includes('cup') || pLower.includes('latte')) {
+      themeColor1 = '#d97706';
+      themeColor2 = '#78350f';
+      category = 'Coffee & Cafe';
+      iconSvg = `
+        <ellipse cx="400" cy="530" rx="220" ry="24" fill="#000000" opacity="0.5"/>
+        <ellipse cx="400" cy="510" rx="190" ry="18" fill="#fde68a" stroke="#d97706" stroke-width="6"/>
+        <path d="M280 340 L520 340 L490 480 C490 500 460 510 400 510 C340 510 310 500 310 480 Z" fill="#ffffff" stroke="#d97706" stroke-width="8"/>
+        <path d="M510 370 C560 370 570 440 500 450" fill="none" stroke="#d97706" stroke-width="12" stroke-linecap="round"/>
+        <path d="M350 300 Q360 250 340 210" stroke="#fbbf24" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <path d="M400 290 Q410 240 390 200" stroke="#fbbf24" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <path d="M450 300 Q460 250 440 210" stroke="#fbbf24" stroke-width="6" fill="none" stroke-linecap="round"/>
+      `;
+    } else if (pLower.includes('armchair') || pLower.includes('chair') || pLower.includes('living room') || pLower.includes('furniture')) {
       themeColor1 = '#d97706';
       themeColor2 = '#b45309';
       category = 'Interior & Furniture';
@@ -759,7 +798,7 @@ export async function generateAiFallbackImage(params: {
         <circle cx="500" cy="230" r="32" fill="#ef4444"/>
         <text x="500" y="238" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">50%</text>
       `;
-    } else if (pLower.includes('shop') || pLower.includes('store') || pLower.includes('cafe') || pLower.includes('bakery')) {
+    } else if (pLower.includes('shop') || pLower.includes('store') || pLower.includes('bakery') || pLower.includes('bread')) {
       themeColor1 = '#059669';
       themeColor2 = '#0d9488';
       category = 'Storefront & Retail';
@@ -772,7 +811,7 @@ export async function generateAiFallbackImage(params: {
         <circle cx="525" cy="460" r="6" fill="#fef08a"/>
       `;
     } else {
-      category = 'Product Presentation';
+      category = 'Creative Visual';
       iconSvg = `
         <circle cx="400" cy="380" r="160" fill="#ede9fe" stroke="#c4b5fd" stroke-width="6"/>
         <rect x="300" y="300" width="200" height="160" rx="20" fill="#8b5cf6" opacity="0.85"/>
@@ -806,7 +845,7 @@ export async function generateAiFallbackImage(params: {
         <!-- Top Badge -->
         <rect x="50" y="45" width="240" height="34" rx="17" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
         <circle cx="68" cy="62" r="6" fill="#a855f7"/>
-        <text x="84" y="67" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#cbd5e1" letter-spacing="1">AI STUDIO DESIGNER</text>
+        <text x="84" y="67" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#cbd5e1" letter-spacing="1">VIDHUB AI STUDIO</text>
 
         <!-- Category Tag -->
         <rect x="540" y="45" width="210" height="34" rx="17" fill="url(#brandGrad)"/>
@@ -817,9 +856,9 @@ export async function generateAiFallbackImage(params: {
 
         <!-- Bottom Prompt Card -->
         <rect x="40" y="650" width="720" height="110" rx="20" fill="#020617" stroke="#334155" stroke-width="1.5"/>
-        <text x="70" y="685" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="1">STUDENT BRIEF PROMPT</text>
+        <text x="70" y="685" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="1">CREATIVE PROMPT</text>
         <text x="70" y="722" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-style="italic" font-weight="600" fill="#f8fafc">"${cleanPrompt.length > 70 ? cleanPrompt.slice(0, 67) + '...' : cleanPrompt}"</text>
-        <text x="700" y="722" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#a855f7" text-anchor="end">${params.school_code} • ${params.full_name}</text>
+        <text x="700" y="722" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#a855f7" text-anchor="end">${params.full_name} • VidHub</text>
       </svg>
     `;
 

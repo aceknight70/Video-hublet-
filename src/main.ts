@@ -116,15 +116,58 @@ let animationFrameId = 0;
 let selectedItemId: string | null = null;
 let selectedItemType: 'video' | 'overlay' | null = null;
 
-let currentClientId = sessionStorage.getItem('vidhub_client_id') || 'demo_client';
-let currentStaffId = sessionStorage.getItem('vidhub_staff_id') || 'demo_staff';
+const memStorage = new Map<string, string>();
+function getStorage(key: string, defaultVal: string = ''): string {
+  try {
+    const val = sessionStorage.getItem(key);
+    return val !== null ? val : (memStorage.get(key) || defaultVal);
+  } catch {
+    return memStorage.get(key) || defaultVal;
+  }
+}
+function setStorage(key: string, val: string): void {
+  try {
+    sessionStorage.setItem(key, val);
+  } catch {
+    memStorage.set(key, val);
+  }
+}
+function removeStorage(key: string): void {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    memStorage.delete(key);
+  }
+}
+
+function showNotification(msg: string, isError: boolean = false): void {
+  let toast = document.getElementById('vidhub-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'vidhub-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.className = `fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-2xl transition-all duration-300 pointer-events-none flex items-center gap-2 max-w-sm text-center ${isError ? 'bg-red-600 text-white border border-red-400' : 'bg-zinc-800 text-white border border-zinc-700'}`;
+  toast.style.opacity = '1';
+  toast.style.transform = 'translate(-50%, 0)';
+  setTimeout(() => {
+    if (toast) {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translate(-50%, -10px)';
+    }
+  }, 3500);
+}
+
+let currentClientId = getStorage('vidhub_client_id', 'demo_client');
+let currentStaffId = getStorage('vidhub_staff_id', 'demo_staff');
 
 // Student Portal & AI Create State (?mode=school)
 const urlParams = new URLSearchParams(window.location.search);
-let isSchoolMode = urlParams.get('mode') === 'school' || sessionStorage.getItem('vidhub_mode') === 'school';
-let currentStudentSchoolCode = sessionStorage.getItem('vidhub_school_code') || urlParams.get('school_code') || 'SCH01';
-let currentStudentName = sessionStorage.getItem('vidhub_student_name') || urlParams.get('student_name') || currentStaffId || 'Student';
-let currentStudentPin = sessionStorage.getItem('vidhub_student_pin') || urlParams.get('pin') || '1234';
+let isSchoolMode = urlParams.get('mode') === 'school' || getStorage('vidhub_mode') === 'school';
+let currentStudentSchoolCode = getStorage('vidhub_school_code', urlParams.get('school_code') || 'SCH01');
+let currentStudentName = getStorage('vidhub_student_name', urlParams.get('student_name') || currentStaffId || 'Student');
+let currentStudentPin = getStorage('vidhub_student_pin', urlParams.get('pin') || '1234');
 let currentAiImageBlob: Blob | null = null;
 let currentAiImageUrl: string | null = null;
 let currentAiFilePath: string | null = null;
@@ -167,6 +210,7 @@ const elements = {
   btnExport: document.getElementById('btn-export') as HTMLButtonElement,
 
   previewContainer: document.getElementById('preview-container') as HTMLDivElement,
+  previewEmptyState: document.getElementById('preview-empty-state') as HTMLDivElement,
   previewPlayerA: document.getElementById('preview-player-a') as HTMLVideoElement,
   previewPlayerB: document.getElementById('preview-player-b') as HTMLVideoElement,
   transitionOverlay: document.getElementById('transition-overlay') as HTMLDivElement,
@@ -319,11 +363,18 @@ function init() {
   checkAuth();
   setupLoginSwitcher();
 
-  // Toolbar events
+  // Toolbar & Canvas events
   elements.btnLogin.addEventListener('click', handleLogin);
   elements.toolUpload.addEventListener('click', () => elements.uploadInput.click());
   elements.btnInlineAdd.addEventListener('click', () => elements.uploadInput.click());
   elements.uploadInput.addEventListener('change', handleUpload);
+
+  document.getElementById('btn-empty-ai-create')?.addEventListener('click', () => {
+    openAiCreateModal();
+  });
+  document.getElementById('btn-empty-upload')?.addEventListener('click', () => {
+    elements.uploadInput.click();
+  });
 
   elements.toolImage?.addEventListener('click', () => elements.imageUploadInput.click());
   elements.imageUploadInput?.addEventListener('change', handleImageUpload);
@@ -406,48 +457,45 @@ function init() {
 }
 
 function checkAuth() {
-  // If ?mode=school is in URL, configure student area
   if (isSchoolMode) {
-    sessionStorage.setItem('vidhub_mode', 'school');
-    // If student params provided in URL or session, set them
+    setStorage('vidhub_mode', 'school');
     const pSchool = urlParams.get('school_code');
     const pStudent = urlParams.get('student_name');
     const pPin = urlParams.get('pin');
     if (pSchool) {
       currentStudentSchoolCode = pSchool;
-      sessionStorage.setItem('vidhub_school_code', pSchool);
+      setStorage('vidhub_school_code', pSchool);
     }
     if (pStudent) {
       currentStudentName = pStudent;
       currentStaffId = pStudent;
-      sessionStorage.setItem('vidhub_student_name', pStudent);
-      sessionStorage.setItem('vidhub_staff_id', pStudent);
+      setStorage('vidhub_student_name', pStudent);
+      setStorage('vidhub_staff_id', pStudent);
     }
     if (pPin) {
       currentStudentPin = pPin;
-      sessionStorage.setItem('vidhub_student_pin', pPin);
-    }
-
-    // In student mode, show AI Create button in toolbar
-    if (elements.toolAiCreate) {
-      elements.toolAiCreate.classList.remove('hidden');
-    }
-  } else {
-    // Staff and Master mode: hide AI Create button (student only in Phase 2)
-    if (elements.toolAiCreate) {
-      elements.toolAiCreate.classList.add('hidden');
+      setStorage('vidhub_student_pin', pPin);
     }
   }
 
-  if (currentClientId && currentStaffId) {
+  // Ensure AI Create tool is always visible for everyone
+  if (elements.toolAiCreate) {
+    elements.toolAiCreate.classList.remove('hidden');
+  }
+
+  currentClientId = currentClientId || 'demo_client';
+  currentStaffId = currentStaffId || 'demo_staff';
+
+  updateModeIndicator();
+
+  // Keep editor open and ready - never block on empty state
+  if (elements.loginOverlay) {
     elements.loginOverlay.classList.add('hidden');
-    renderTimeline();
-    // Keep storage small: clean up exports & clips older than 48 hours for this staff member
-    cleanupOldStaffExports(currentClientId, currentStaffId);
-    cleanupOldStaffClips(currentClientId, currentStaffId);
-  } else {
-    elements.loginOverlay.classList.remove('hidden');
   }
+
+  renderTimeline();
+  cleanupOldStaffExports(currentClientId, currentStaffId);
+  cleanupOldStaffClips(currentClientId, currentStaffId);
 }
 
 function handleLogin() {
@@ -456,9 +504,9 @@ function handleLogin() {
   currentClientId = cid;
   currentStaffId = sid;
   isSchoolMode = false;
-  sessionStorage.removeItem('vidhub_mode');
-  sessionStorage.setItem('vidhub_client_id', cid);
-  sessionStorage.setItem('vidhub_staff_id', sid);
+  removeStorage('vidhub_mode');
+  setStorage('vidhub_client_id', cid);
+  setStorage('vidhub_staff_id', sid);
   checkAuth();
 }
 
@@ -474,12 +522,12 @@ function handleStudentLogin() {
   currentClientId = school;
   currentStaffId = name;
 
-  sessionStorage.setItem('vidhub_mode', 'school');
-  sessionStorage.setItem('vidhub_school_code', school);
-  sessionStorage.setItem('vidhub_student_name', name);
-  sessionStorage.setItem('vidhub_student_pin', pin);
-  sessionStorage.setItem('vidhub_client_id', school);
-  sessionStorage.setItem('vidhub_staff_id', name);
+  setStorage('vidhub_mode', 'school');
+  setStorage('vidhub_school_code', school);
+  setStorage('vidhub_student_name', name);
+  setStorage('vidhub_student_pin', pin);
+  setStorage('vidhub_client_id', school);
+  setStorage('vidhub_staff_id', name);
 
   checkAuth();
 }
@@ -517,7 +565,7 @@ async function handleUpload(e: Event) {
 
   const files = Array.from(target.files);
   if (videoSequence.length + files.length > CONFIG.maxClips) {
-    alert(`Cap reached: Max ${CONFIG.maxClips} active clips allowed per workspace.`);
+    showNotification(`Cap reached: Max ${CONFIG.maxClips} active clips allowed per workspace.`, true);
     target.value = '';
     return;
   }
@@ -1294,6 +1342,15 @@ function updatePlayheadAndPreview() {
   elements.currentTimeDisplay.textContent = formatTime(currentGlobalTime);
   elements.playhead.style.left = `${currentGlobalTime * PX_PER_SEC}px`;
 
+  // Toggle canvas welcome state so screen is never an ambiguous black box
+  if (elements.previewEmptyState) {
+    if (videoSequence.length === 0 && overlays.length === 0) {
+      elements.previewEmptyState.classList.remove('hidden');
+    } else {
+      elements.previewEmptyState.classList.add('hidden');
+    }
+  }
+
   if (videoSequence.length === 0) {
     elements.previewPlayerA.removeAttribute('src');
     elements.previewPlayerB.removeAttribute('src');
@@ -1834,7 +1891,7 @@ async function startPrompterCamera() {
     prompterScrollPos = 0;
     elements.prompterStageScrollText.style.transform = 'translateY(0px)';
   } catch (err: any) {
-    alert("Camera/Mic access denied: " + (err.message || err));
+    showNotification("Camera/Mic access denied: " + (err.message || err), true);
   }
 }
 
@@ -1881,7 +1938,7 @@ function startPrompterRecording() {
     const duration = await getVideoDuration(url);
 
     if (videoSequence.length >= CONFIG.maxClips) {
-      alert(`Clip cap reached (${CONFIG.maxClips}). Recording saved locally.`);
+      showNotification(`Clip cap reached (${CONFIG.maxClips}). Recording saved locally.`, true);
       return;
     }
 
@@ -2471,7 +2528,7 @@ async function renderAdminDashboardTab() {
       btnClear.disabled = true;
       btnClear.textContent = 'Clearing...';
       const res = await clearAllOldExports();
-      alert(`Deleted ${res.deletedCount} files (${(res.freedBytes / (1024 * 1024)).toFixed(2)} MB freed).`);
+      showNotification(`Deleted ${res.deletedCount} files (${(res.freedBytes / (1024 * 1024)).toFixed(2)} MB freed).`);
       renderAdminDashboardTab();
     });
 
@@ -2869,13 +2926,61 @@ async function handleAdminBeatUpload(e: Event) {
   target.value = '';
 }
 
-// --- ITEM 6: AI CREATE (PHASE 2 - STUDENT PORTAL) ---
+// --- ITEM 6: AI CREATE (UNIVERSAL FEATURE FOR ALL MODES) ---
+function updateModeIndicator() {
+  const btnToggle = document.getElementById('btn-toggle-portal-mode');
+  const textElem = document.getElementById('portal-mode-text');
+  if (btnToggle && textElem) {
+    if (isSchoolMode) {
+      textElem.textContent = `🎓 Student: ${currentStudentName || 'Alex'} (${currentStudentSchoolCode || 'SCH01'})`;
+      btnToggle.className = 'text-[11px] px-2.5 py-1 rounded-full border border-purple-500/50 bg-purple-950/60 text-purple-200 hover:bg-purple-900/60 transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap shadow-sm';
+    } else {
+      textElem.textContent = `🎬 Creator: ${currentStaffId || 'Studio'}`;
+      btnToggle.className = 'text-[11px] px-2.5 py-1 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap';
+    }
+  }
+
+  // Update badge in modal if present
+  const badge = document.getElementById('ai-student-badge');
+  if (badge) {
+    if (isSchoolMode) {
+      badge.textContent = `Student: ${currentStudentName || 'Alex Smith'} (${currentStudentSchoolCode || 'SCH01'})`;
+      badge.className = 'text-[10px] text-purple-300 bg-purple-950/60 border border-purple-800/40 px-2 py-0.5 rounded-full font-mono';
+    } else {
+      badge.textContent = `Creator: ${currentStaffId || currentClientId || 'Studio'}`;
+      badge.className = 'text-[10px] text-emerald-300 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded-full font-mono';
+    }
+  }
+}
+
 function setupAiCreateSystem() {
   if (!elements.toolAiCreate) return;
 
-  // Open modal
+  // Open modal via toolbar button (available for all users)
   elements.toolAiCreate.addEventListener('click', () => {
     openAiCreateModal();
+  });
+
+  // Open modal via header button
+  document.getElementById('btn-header-ai-create')?.addEventListener('click', () => {
+    openAiCreateModal();
+  });
+
+  // Header Mode Switcher Toggle
+  document.getElementById('btn-toggle-portal-mode')?.addEventListener('click', () => {
+    isSchoolMode = !isSchoolMode;
+    if (isSchoolMode) {
+      setStorage('vidhub_mode', 'school');
+      currentStudentSchoolCode = currentStudentSchoolCode || 'SCH01';
+      currentStudentName = currentStudentName || 'Alex Smith';
+      currentStudentPin = currentStudentPin || '1234';
+      setStorage('vidhub_school_code', currentStudentSchoolCode);
+      setStorage('vidhub_student_name', currentStudentName);
+      setStorage('vidhub_student_pin', currentStudentPin);
+    } else {
+      removeStorage('vidhub_mode');
+    }
+    updateModeIndicator();
   });
 
   // Close modal
@@ -2925,22 +3030,26 @@ function setupAiCreateSystem() {
     elements.aiErrorBox.classList.add('hidden');
     elements.aiClipbankStatus.classList.add('hidden');
   });
+
+  updateModeIndicator();
 }
 
 async function openAiCreateModal() {
+  // Universal: keep current mode (Normal Creator or Student) without forcing school mode!
+  updateModeIndicator();
   elements.modalAiCreate.classList.remove('hidden');
   elements.aiErrorBox.classList.add('hidden');
   elements.aiClipbankStatus.classList.add('hidden');
   elements.aiPromptInput.focus();
 
-  // Load student's past pictures
+  // Load user's past pictures
   refreshMyAiPictures();
 }
 
 async function refreshMyAiPictures() {
   if (!elements.myAiPicturesContainer) return;
-  const schoolCode = currentStudentSchoolCode || 'SCH01';
-  const studentName = currentStudentName || currentStaffId || 'Student';
+  const schoolCode = isSchoolMode ? (currentStudentSchoolCode || 'SCH01') : (currentClientId || 'VidHub');
+  const studentName = isSchoolMode ? (currentStudentName || 'Alex Smith') : (currentStaffId || 'Creator');
 
   const pictures = await fetchStudentAiImages(schoolCode, studentName);
   elements.myPicturesCount.textContent = `${pictures.length} saved`;
@@ -2989,9 +3098,9 @@ async function handleGenerateAiPicture() {
   elements.aiErrorBox.classList.add('hidden');
   elements.aiClipbankStatus.classList.add('hidden');
 
-  const schoolCode = currentStudentSchoolCode || 'SCH01';
-  const studentName = currentStudentName || currentStaffId || 'Student';
-  const pin = currentStudentPin || '1234';
+  const schoolCode = isSchoolMode ? (currentStudentSchoolCode || 'SCH01') : (currentClientId || 'VidHub');
+  const studentName = isSchoolMode ? (currentStudentName || 'Alex Smith') : (currentStaffId || 'Creator');
+  const pin = isSchoolMode ? (currentStudentPin || '1234') : 'creator';
 
   try {
     // 1. Call the Supabase Edge Function 'ai-designer'
@@ -3087,7 +3196,7 @@ async function handleUseAiImageInVideo() {
 
     elements.modalAiCreate.classList.add('hidden');
   } catch (err: any) {
-    alert("Could not load image into timeline: " + err.message);
+    showNotification("Could not load image into timeline: " + err.message, true);
   } finally {
     elements.btnUseAiImage.disabled = false;
     elements.btnUseAiImage.innerHTML = `
@@ -3109,15 +3218,16 @@ async function handleSendAiImageToClipBank() {
     const blob = await resp.blob();
 
     const selectedBrief = elements.aiBriefSelect?.value || 'general';
-    const schoolCode = currentStudentSchoolCode || 'SCH01';
-    const studentName = currentStudentName || currentStaffId || 'Student';
+    const schoolCode = isSchoolMode ? (currentStudentSchoolCode || 'SCH01') : (currentClientId || 'VidHub');
+    const studentName = isSchoolMode ? (currentStudentName || 'Alex Smith') : (currentStaffId || 'Creator');
+    const businessName = isSchoolMode ? 'Student Business' : `${currentClientId || 'Studio'} Project`;
 
     const res = await sendImageToClipBank({
       schoolCode,
       studentName,
       imageBlob: blob,
       brief: selectedBrief,
-      businessName: 'Student Business'
+      businessName
     });
 
     if (res.success) {
@@ -3202,7 +3312,7 @@ function updateTransitionModalUI() {
 
 function previewTransition() {
   if (videoSequence.length < 2) {
-    alert("Add at least 2 video clips to preview transitions.");
+    showNotification("Add at least 2 video clips to preview transitions.", true);
     return;
   }
   const firstClipDur = videoSequence[0].trimEnd - videoSequence[0].trimStart;
@@ -3340,7 +3450,7 @@ function setupVoiceover() {
       playback.classList.remove('hidden');
       btnSave.classList.remove('hidden');
     } catch (e: any) {
-      alert("TTS Error: " + e.message);
+      showNotification("TTS Error: " + e.message, true);
     } finally {
       loadingAi.classList.add('hidden');
       btnGenAi.disabled = false;
@@ -3381,7 +3491,7 @@ function setupVoiceover() {
         playback.classList.add('hidden');
         btnSave.classList.add('hidden');
       } catch {
-        alert("Mic access denied");
+        showNotification("Microphone access denied. Please allow microphone permissions.", true);
       }
     }
   });
