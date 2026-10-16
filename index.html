@@ -122,6 +122,11 @@
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="group-hover:rotate-12 transition-transform"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/><path d="M5 3v4"/><path d="M3 5h4"/></svg>
           <span>AI Create</span>
         </button>
+
+        <button id="btn-header-photo-showcase" type="button" class="text-[11px] px-3 py-1 rounded-full bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-black font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer whitespace-nowrap group">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+          <span>Photo Showcase</span>
+        </button>
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
@@ -163,6 +168,10 @@
               <button id="btn-empty-upload" type="button" class="w-full py-2 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs rounded-xl border border-zinc-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
                 <span>Add Video Clips</span>
+              </button>
+              <button id="btn-empty-photo-showcase" type="button" class="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-black font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                <span>Photo Showcase (9:16)</span>
               </button>
             </div>
           </div>
@@ -322,6 +331,13 @@
         <div class="absolute -top-1 -right-1 px-1.5 py-0.5 bg-gradient-to-r from-purple-500 to-pink-500 text-[8px] font-black rounded-full text-white uppercase tracking-tighter">AI</div>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1 text-purple-400 group-hover:text-purple-300"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/><path d="M5 3v4"/><path d="M3 5h4"/></svg>
         <span class="text-[10px] font-medium text-purple-300 group-hover:text-white">AI Create</span>
+      </button>
+
+      <!-- Photo Showcase Button -->
+      <button id="tool-photo-showcase" class="flex flex-col items-center justify-center w-16 h-16 rounded-xl hover:bg-zinc-900 transition-colors shrink-0 relative group">
+        <div class="absolute -top-1 -right-1 px-1.5 py-0.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-[8px] font-black rounded-full text-black uppercase tracking-tighter">9:16</div>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1 text-amber-400 group-hover:text-amber-300"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+        <span class="text-[10px] font-medium text-amber-300 group-hover:text-white">Showcase</span>
       </button>
 
       <div class="w-px h-8 bg-zinc-800 mx-1 shrink-0"></div>
@@ -655,7 +671,7 @@
             <div>
               <div class="flex items-center gap-2">
                 <h3 class="font-bold text-base text-white">AI Image Studio</h3>
-                <span class="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.5 rounded-full font-bold">✨ Gemini AI</span>
+                <span class="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.5 rounded-full font-bold">✨ AI Studio</span>
               </div>
               <div class="flex items-center gap-2 mt-0.5 flex-wrap">
                 <p class="text-xs text-zinc-400">Make custom visuals, product shots & posters for your video.</p>
@@ -766,6 +782,358 @@
           </div>
           <div id="my-ai-pictures-container" class="flex gap-2.5 overflow-x-auto py-1 custom-scrollbar min-h-[64px]">
             <p class="text-[11px] text-zinc-500 py-3">No AI pictures generated yet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Photo Showcase Modal (Vertical 9:16 Ken Burns Studio) -->
+    <div id="modal-photo-showcase" class="fixed inset-0 bg-black/95 z-50 hidden flex flex-col overflow-hidden">
+      <!-- Showcase Header -->
+      <header class="h-14 shrink-0 flex justify-between items-center px-4 bg-zinc-950 border-b border-zinc-800 z-10">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-yellow-600 text-black flex items-center justify-center font-black shadow-md">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="font-bold text-sm sm:text-base text-white">Photo Showcase Studio</h2>
+              <span class="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">Vertical 9:16</span>
+            </div>
+            <p class="text-[11px] text-zinc-400 hidden sm:block">Turn furniture & product photos into luxury showcase videos with zoom, tilt & captions</p>
+          </div>
+        </div>
+        <button id="sc-btn-close" type="button" class="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" title="Return to Video Editor">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          <span class="hidden sm:inline">Close</span>
+        </button>
+      </header>
+
+      <!-- Main Showcase Container (Responsive grid: left stage, right controls) -->
+      <div class="flex-1 overflow-y-auto custom-scrollbar p-3 sm:p-5 max-w-6xl mx-auto w-full">
+        <div class="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-5 items-start">
+
+          <!-- Left Column: The Stage (Canvas Preview & Playback) -->
+          <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col items-center gap-3 shadow-xl lg:sticky lg:top-2">
+            <!-- 720x1280 9:16 Canvas -->
+            <div class="w-full flex justify-center">
+              <canvas id="sc-cv" width="720" height="1280" class="max-h-[46vh] lg:max-h-[520px] aspect-[9/16] w-auto bg-black rounded-xl border border-zinc-800 shadow-2xl object-contain"></canvas>
+            </div>
+
+            <!-- Timeline Scrubber -->
+            <div class="w-full flex items-center gap-2 pt-1">
+              <input id="sc-sc" type="range" min="0" max="1" step="0.01" value="0" aria-label="Timeline scrubber" class="flex-1 h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-400">
+              <span id="sc-tt" class="text-xs font-mono font-bold text-amber-300 w-12 text-right">0.0s</span>
+            </div>
+
+            <!-- Playback Bar -->
+            <div class="w-full grid grid-cols-3 gap-2">
+              <button id="sc-pS" type="button" class="py-2.5 px-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1 cursor-pointer">
+                <span>▶ This photo</span>
+              </button>
+              <button id="sc-pA" type="button" class="py-2.5 px-2 bg-amber-500 hover:bg-amber-400 text-black rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-md">
+                <span>▶ Play All</span>
+              </button>
+              <button id="sc-pX" type="button" class="py-2.5 px-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1 cursor-pointer">
+                <span>⏸ Pause</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Right Column: Controls, Photo Strip, Tabs & Configuration -->
+          <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-5 flex flex-col gap-4 shadow-xl min-w-0">
+
+            <!-- Photo Upload & Strip Row -->
+            <div class="space-y-2">
+              <div class="flex items-center gap-3 flex-wrap">
+                <label for="sc-up" id="sc-addb" class="py-2.5 px-4 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-black font-bold text-xs rounded-xl shadow transition-all flex items-center gap-2 cursor-pointer select-none">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                  <span>Add photos</span>
+                </label>
+                <input type="file" id="sc-up" accept="image/*" multiple class="sr-only">
+                <span id="sc-upn" class="text-xs text-zinc-400 font-medium"></span>
+              </div>
+
+              <!-- Strip -->
+              <div id="sc-strip" class="flex gap-2.5 overflow-x-auto py-2 custom-scrollbar min-h-[105px]">
+                <!-- Populated dynamically -->
+              </div>
+
+              <!-- Strip Operations -->
+              <div id="sc-ops" class="flex gap-1.5 flex-wrap pt-1">
+                <button data-op="up" type="button" class="py-1.5 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium border border-zinc-700/80 transition-colors cursor-pointer">◀ Earlier</button>
+                <button data-op="dn" type="button" class="py-1.5 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium border border-zinc-700/80 transition-colors cursor-pointer">Later ▶</button>
+                <button data-op="dup" type="button" class="py-1.5 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium border border-zinc-700/80 transition-colors cursor-pointer">Duplicate</button>
+                <button data-op="del" type="button" class="py-1.5 px-3 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 text-xs font-medium border border-red-800/40 transition-colors cursor-pointer">Remove</button>
+              </div>
+            </div>
+
+            <!-- Tabs -->
+            <div id="sc-tabs" class="flex gap-1.5 flex-wrap border-b border-zinc-800 pb-2">
+              <button data-t="motion" type="button" class="py-2 px-3.5 rounded-xl bg-amber-500 text-black font-bold text-xs border border-amber-500 transition-colors cursor-pointer">Motion</button>
+              <button data-t="crop" type="button" class="py-2 px-3.5 rounded-xl bg-zinc-900 text-zinc-300 text-xs font-medium border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer">Crop</button>
+              <button data-t="cap" type="button" class="py-2 px-3.5 rounded-xl bg-zinc-900 text-zinc-300 text-xs font-medium border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer">Caption</button>
+              <button data-t="brand" type="button" class="py-2 px-3.5 rounded-xl bg-zinc-900 text-zinc-300 text-xs font-medium border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer">Brand</button>
+              <button data-t="close" type="button" class="py-2 px-3.5 rounded-xl bg-zinc-900 text-zinc-300 text-xs font-medium border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer">Closing</button>
+              <button data-t="out" type="button" class="py-2 px-3.5 rounded-xl bg-zinc-900 text-zinc-300 text-xs font-medium border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer">Export</button>
+            </div>
+
+            <!-- Tab Panels -->
+
+            <!-- 1. Motion Panel -->
+            <div id="sc-p-motion" class="sc-pn grid gap-4">
+              <!-- Presets -->
+              <div class="space-y-1.5">
+                <span class="text-xs text-zinc-400 font-medium">Luxury Motion Presets:</span>
+                <div class="flex gap-2 flex-wrap">
+                  <button data-pre="B" type="button" class="py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-semibold text-xs border border-amber-500/30 transition-colors cursor-pointer">Deep dramatic</button>
+                  <button data-pre="A" type="button" class="py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-semibold text-xs border border-amber-500/30 transition-colors cursor-pointer">Luxury slow</button>
+                  <button data-pre="C" type="button" class="py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-semibold text-xs border border-amber-500/30 transition-colors cursor-pointer">Extreme detail</button>
+                </div>
+              </div>
+
+              <!-- Tap to choose zoom target -->
+              <div class="p-3 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2">
+                <div class="flex justify-between items-center">
+                  <span class="text-xs font-semibold text-zinc-300">Tap target on photo:</span>
+                  <div class="flex items-center gap-3 text-xs text-zinc-400">
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" name="sc-m" value="start" checked class="accent-amber-400">
+                      <span>Zoom target (Gold)</span>
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" name="sc-m" value="end" class="accent-emerald-400">
+                      <span>Pan to (Green)</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="flex justify-center">
+                  <div id="sc-pk" class="relative w-full max-w-[240px] aspect-[4/3] rounded-lg overflow-hidden border border-zinc-700 bg-black cursor-crosshair touch-none select-none">
+                    <img alt="" class="w-full h-full object-contain pointer-events-none">
+                    <i class="d1 absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 border-white bg-amber-400 pointer-events-none shadow-md"></i>
+                    <i class="d2 absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 border-white bg-emerald-400 pointer-events-none shadow-md hidden"></i>
+                  </div>
+                </div>
+                <label class="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer pt-1">
+                  <input type="checkbox" data-sc="s" data-k="pan" class="accent-amber-400">
+                  <span>Pan from target to second point</span>
+                </label>
+              </div>
+
+              <!-- Motion Sliders -->
+              <div class="grid gap-2.5">
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Seconds on screen</span>
+                  <input type="range" data-sc="s" data-k="sec" min="2" max="30" step="0.5" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">8</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Start zoom ×</span>
+                  <input type="range" data-sc="s" data-k="zs" min="0.5" max="6" step="0.05" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">1</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Max zoom ×</span>
+                  <input type="range" data-sc="s" data-k="zmax" min="0.5" max="8" step="0.05" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">2.5</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Reach max at (s)</span>
+                  <input type="range" data-sc="s" data-k="tin" min="0.1" max="30" step="0.1" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">4</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Hold at max (s)</span>
+                  <input type="range" data-sc="s" data-k="hold" min="0" max="10" step="0.1" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">0</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">End zoom ×</span>
+                  <input type="range" data-sc="s" data-k="ze" min="0.5" max="6" step="0.05" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">1.15</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Start tilt °</span>
+                  <input type="range" data-sc="s" data-k="tilt0" min="-90" max="90" step="1" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">0</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">End tilt °</span>
+                  <input type="range" data-sc="s" data-k="tilt1" min="-90" max="90" step="1" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">0</output>
+                </label>
+
+                <label class="flex flex-col gap-1 text-xs pt-1">
+                  <span class="text-zinc-400">Movement curve</span>
+                  <select data-sc="s" data-k="curve" class="w-full bg-zinc-950 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs">
+                    <option value="smooth">smooth</option>
+                    <option value="linear">linear</option>
+                    <option value="ease_in">ease_in</option>
+                    <option value="ease_out">ease_out</option>
+                    <option value="dramatic">dramatic</option>
+                  </select>
+                </label>
+
+                <label class="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer pt-1">
+                  <input type="checkbox" data-sc="s" data-k="flip" class="accent-amber-400">
+                  <span>Flip photo left-right</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 2. Crop Panel -->
+            <div id="sc-p-crop" class="sc-pn hidden gap-3">
+              <p class="text-xs text-zinc-400">Trim edges to remove unwanted items or fit framing.</p>
+              <div class="grid gap-2.5">
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Cut from left %</span>
+                  <input type="range" data-sc="s" data-k="cl" min="0" max="45" step="1" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">0</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Cut from right %</span>
+                  <input type="range" data-sc="s" data-k="cr" min="0" max="45" step="1" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">0</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Cut from top %</span>
+                  <input type="range" data-sc="s" data-k="ct" min="0" max="45" step="1" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">0</output>
+                </label>
+                <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                  <span class="text-zinc-400">Cut from bottom %</span>
+                  <input type="range" data-sc="s" data-k="cb" min="0" max="45" step="1" class="accent-amber-400">
+                  <output class="text-right text-amber-300 font-mono tabular-nums">0</output>
+                </label>
+              </div>
+            </div>
+
+            <!-- 3. Caption Panel -->
+            <div id="sc-p-cap" class="sc-pn hidden gap-3">
+              <label class="flex flex-col gap-1 text-xs">
+                <span class="text-zinc-400">Name / Product Title</span>
+                <input type="text" data-sc="s" data-k="name" placeholder="e.g. Italian Leather Armchair" class="w-full bg-zinc-950 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs">
+              </label>
+              <label class="flex flex-col gap-1 text-xs">
+                <span class="text-zinc-400">Price / Offer</span>
+                <input type="text" data-sc="s" data-k="price" placeholder="e.g. $1,450" class="w-full bg-zinc-950 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs">
+              </label>
+              <label class="flex flex-col gap-1 text-xs">
+                <span class="text-zinc-400">Extra line / Feature</span>
+                <input type="text" data-sc="s" data-k="extra" placeholder="e.g. Solid Oak Frame • In Stock" class="w-full bg-zinc-950 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs">
+              </label>
+              <label class="flex flex-col gap-1 text-xs">
+                <span class="text-zinc-400">Caption position</span>
+                <select data-sc="s" data-k="capPos" class="w-full bg-zinc-950 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs">
+                  <option value="bottom">bottom</option>
+                  <option value="middle">middle</option>
+                  <option value="top">top</option>
+                </select>
+              </label>
+              <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                <span class="text-zinc-400">Appears after (s)</span>
+                <input type="range" data-sc="s" data-k="capDelay" min="0" max="10" step="0.1" class="accent-amber-400">
+                <output class="text-right text-amber-300 font-mono tabular-nums">0.6</output>
+              </label>
+            </div>
+
+            <!-- 4. Brand Panel -->
+            <div id="sc-p-brand" class="sc-pn hidden gap-3">
+              <label class="flex flex-col gap-1 text-xs">
+                <span class="text-zinc-400">Logo image</span>
+                <input type="file" id="sc-lg" accept="image/*" class="w-full text-xs text-zinc-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 cursor-pointer">
+              </label>
+              <label class="flex flex-col gap-1 text-xs">
+                <span class="text-zinc-400">Logo corner</span>
+                <select data-sc="g" data-k="corner" class="w-full bg-zinc-950 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs">
+                  <option value="top-right">top-right</option>
+                  <option value="top-left">top-left</option>
+                  <option value="bottom-right">bottom-right</option>
+                  <option value="bottom-left">bottom-left</option>
+                </select>
+              </label>
+              <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                <span class="text-zinc-400">Logo size</span>
+                <input type="range" data-sc="g" data-k="logoSize" min="0.08" max="0.5" step="0.01" class="accent-amber-400">
+                <output class="text-right text-amber-300 font-mono tabular-nums">0.2</output>
+              </label>
+              <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                <span class="text-zinc-400">Gold / price colour</span>
+                <input type="color" data-sc="g" data-k="accent" value="#d4af37" class="w-10 h-8 rounded border border-zinc-800 cursor-pointer bg-transparent">
+                <output class="text-right text-amber-300 font-mono tabular-nums">#d4af37</output>
+              </label>
+              <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                <span class="text-zinc-400">Caption text colour</span>
+                <input type="color" data-sc="g" data-k="text" value="#f5efe0" class="w-10 h-8 rounded border border-zinc-800 cursor-pointer bg-transparent">
+                <output class="text-right text-amber-300 font-mono tabular-nums">#f5efe0</output>
+              </label>
+              <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                <span class="text-zinc-400">Caption box dark</span>
+                <input type="range" data-sc="g" data-k="barOp" min="0" max="1" step="0.05" class="accent-amber-400">
+                <output class="text-right text-amber-300 font-mono tabular-nums">0.6</output>
+              </label>
+              <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                <span class="text-zinc-400">Caption text size</span>
+                <input type="range" data-sc="g" data-k="capSize" min="0.6" max="1.5" step="0.05" class="accent-amber-400">
+                <output class="text-right text-amber-300 font-mono tabular-nums">1</output>
+              </label>
+              <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                <span class="text-zinc-400">Crossfade (s)</span>
+                <input type="range" data-sc="g" data-k="trans" min="0" max="2" step="0.1" class="accent-amber-400">
+                <output class="text-right text-amber-300 font-mono tabular-nums">0.6</output>
+              </label>
+            </div>
+
+            <!-- 5. Closing Panel -->
+            <div id="sc-p-close" class="sc-pn hidden gap-3">
+              <label class="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                <input type="checkbox" data-sc="c" data-k="on" checked class="accent-amber-400">
+                <span class="font-semibold">Show closing screen</span>
+              </label>
+              <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                <span class="text-zinc-400">Seconds</span>
+                <input type="range" data-sc="c" data-k="sec" min="2" max="12" step="0.5" class="accent-amber-400">
+                <output class="text-right text-amber-300 font-mono tabular-nums">4</output>
+              </label>
+              <label class="grid grid-cols-[140px_1fr_45px] gap-2 items-center text-xs">
+                <span class="text-zinc-400">Background</span>
+                <input type="color" data-sc="c" data-k="bg" value="#111111" class="w-10 h-8 rounded border border-zinc-800 cursor-pointer bg-transparent">
+                <output class="text-right text-amber-300 font-mono tabular-nums">#111111</output>
+              </label>
+              <label class="flex flex-col gap-1 text-xs">
+                <span class="text-zinc-400">Title</span>
+                <input type="text" data-sc="c" data-k="title" placeholder="Your Brand Name" class="w-full bg-zinc-950 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs">
+              </label>
+              <label class="flex flex-col gap-1 text-xs">
+                <span class="text-zinc-400">Contact lines (one per line)</span>
+                <textarea rows="4" data-sc="c" data-k="lines" class="w-full bg-zinc-950 border border-zinc-800 text-white rounded-xl p-3 text-xs custom-scrollbar"></textarea>
+              </label>
+            </div>
+
+            <!-- 6. Export Panel -->
+            <div id="sc-p-out" class="sc-pn hidden gap-3">
+              <label class="flex flex-col gap-1 text-xs">
+                <span class="text-zinc-400">Frame rate</span>
+                <select data-sc="g" data-k="fps" class="w-full bg-zinc-950 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs">
+                  <option value="30">30</option>
+                  <option value="24">24</option>
+                  <option value="60">60</option>
+                </select>
+              </label>
+
+              <button id="sc-ex" type="button" class="w-full py-3.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 disabled:opacity-50 text-black font-bold text-sm rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>Create video</span>
+              </button>
+
+              <div id="sc-exn" class="text-xs text-zinc-400 leading-relaxed italic text-center">
+                Creating plays the video in real time (about as long as the video). Keep this screen open.
+              </div>
+
+              <div id="sc-res"></div>
+            </div>
+
           </div>
         </div>
       </div>

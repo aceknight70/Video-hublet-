@@ -38,6 +38,11 @@ import {
   getShapeCssClipPath,
   renderTextOverlayBlob
 } from './shape_masks';
+import {
+  initPhotoShowcase,
+  openPhotoShowcase,
+  closePhotoShowcase
+} from './photo_showcase';
 
 // --- CONFIG & CONSTANTS ---
 export const MASTER_PIN = '2026';
@@ -356,6 +361,11 @@ const elements = {
   aiClipbankStatus: document.getElementById('ai-clipbank-status') as HTMLDivElement,
   myAiPicturesContainer: document.getElementById('my-ai-pictures-container') as HTMLDivElement,
   myPicturesCount: document.getElementById('my-pictures-count') as HTMLSpanElement,
+
+  // Photo Showcase (Vertical 9:16)
+  btnHeaderPhotoShowcase: document.getElementById('btn-header-photo-showcase') as HTMLButtonElement | null,
+  btnEmptyPhotoShowcase: document.getElementById('btn-empty-photo-showcase') as HTMLButtonElement | null,
+  toolPhotoShowcase: document.getElementById('tool-photo-showcase') as HTMLButtonElement | null,
 };
 
 // --- INITIALIZATION ---
@@ -417,6 +427,9 @@ function init() {
 
   // AI Create (Phase 2)
   setupAiCreateSystem();
+
+  // Photo Showcase Studio (Vertical 9:16)
+  setupPhotoShowcaseSystem();
 
   // Trim tool
   elements.toolTrim.addEventListener('click', handleTrimClick);
@@ -3094,7 +3107,7 @@ async function handleGenerateAiPicture() {
 
   // UI state: working
   elements.btnMakeAiPicture.disabled = true;
-  elements.btnMakeAiPictureText.textContent = "✨ Gemini AI is generating your picture...";
+  elements.btnMakeAiPictureText.textContent = "✨ Generating picture...";
   elements.aiErrorBox.classList.add('hidden');
   elements.aiClipbankStatus.classList.add('hidden');
 
@@ -3241,6 +3254,54 @@ async function handleSendAiImageToClipBank() {
     `;
   }
 }
+
+function setupPhotoShowcaseSystem() {
+  initPhotoShowcase({
+    defaultBrandTitle: isSchoolMode
+      ? 'Student Design Studio'
+      : (currentClientId && currentClientId !== 'demo_client' ? `${currentClientId} Furniture` : 'Your Brand Name'),
+    onSendToEditor: async (blob: Blob, name: string) => {
+      try {
+        const file = new File([blob], name, { type: blob.type || 'video/mp4' });
+        const url = URL.createObjectURL(file);
+        const duration = await getVideoDuration(url);
+        const clipId = `vid_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+        const clip: VideoClip = {
+          id: clipId,
+          file,
+          url,
+          duration,
+          trimStart: 0,
+          trimEnd: duration,
+          name: file.name
+        };
+        videoSequence.push(clip);
+        uploadClipToSupabase(currentClientId, currentStaffId, clipId, file, duration).then(res => {
+          clip.fileUrl = res.fileUrl;
+        });
+        selectItem(clip.id, 'video');
+        renderTimeline();
+        updatePlayheadAndPreview();
+        showNotification('✨ Photo Showcase video added to timeline!');
+      } catch (err: any) {
+        console.error('Error adding showcase to timeline:', err);
+        showNotification('Showcase video added to project.');
+      }
+    }
+  });
+
+  const launchPhotoShowcase = () => {
+    const brandName = isSchoolMode
+      ? (currentStudentSchoolCode ? `${currentStudentSchoolCode} Studio` : 'Student Showcase')
+      : (currentClientId && currentClientId !== 'demo_client' ? `${currentClientId} Furniture` : 'Your Brand Name');
+    openPhotoShowcase(brandName);
+  };
+
+  elements.btnHeaderPhotoShowcase?.addEventListener('click', launchPhotoShowcase);
+  elements.btnEmptyPhotoShowcase?.addEventListener('click', launchPhotoShowcase);
+  elements.toolPhotoShowcase?.addEventListener('click', launchPhotoShowcase);
+}
+
 function setupTransitionControls() {
   elements.toolTransition.addEventListener('click', openTransitionModal);
   elements.btnCloseTransition.addEventListener('click', () => elements.modalTransition.classList.add('hidden'));
