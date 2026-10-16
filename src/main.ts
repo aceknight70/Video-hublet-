@@ -3094,35 +3094,29 @@ async function handleGenerateAiPicture() {
 
   // UI state: working
   elements.btnMakeAiPicture.disabled = true;
-  elements.btnMakeAiPictureText.textContent = "Making... this can take 20 seconds";
+  elements.btnMakeAiPictureText.textContent = "✨ Gemini AI is generating your picture...";
   elements.aiErrorBox.classList.add('hidden');
   elements.aiClipbankStatus.classList.add('hidden');
 
   const schoolCode = isSchoolMode ? (currentStudentSchoolCode || 'SCH01') : (currentClientId || 'VidHub');
   const studentName = isSchoolMode ? (currentStudentName || 'Alex Smith') : (currentStaffId || 'Creator');
   const pin = isSchoolMode ? (currentStudentPin || '1234') : 'creator';
+  const selectedBrief = elements.aiBriefSelect?.value || '';
 
   try {
-    // 1. Call the Supabase Edge Function 'ai-designer'
+    // Call AI Image Generation Engine (Gemini 3.1 Flash Lite Image + AI synthesis)
     const result = await callAiDesignerEdgeFunction({
       school_code: schoolCode,
       full_name: studentName,
       pin: pin,
-      prompt: prompt
+      prompt: prompt,
+      brief: selectedBrief
     });
 
     if (result.error) {
-      // Friendly red box
       showAiError(result.error);
-
-      // If status 429, also hide the button until tomorrow
       if (result.status === 429) {
         elements.btnMakeAiPicture.classList.add('hidden');
-      }
-
-      // If Edge Function returned 404 (not deployed yet to Supabase project), inform gracefully
-      if (result.status === 404) {
-        showAiError(`Supabase Edge Function "ai-designer" returned 404. Once deployed to your Supabase project (habfyuqbvrfdswsxjnfv), this button will generate directly from the edge.`);
       }
       return;
     }

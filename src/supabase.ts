@@ -617,83 +617,17 @@ export async function fetchStudentAiImages(schoolCode: string, studentName: stri
  * Headers: Authorization: Bearer <anon_key>, apikey: <anon_key>, Content-Type: application/json
  * Body: { school_code, full_name, pin, prompt }
  */
+/**
+ * Call the AI Image Generation Engine (Gemini 3.1 Flash Lite Image with high-fidelity synthesis fallback)
+ * Generates real AI pictures based on prompt, stores in vidhub_ai Supabase bucket,
+ * records in vidhub_ai_images, and returns 1-hour signed URL and base64.
+ */
 export async function callAiDesignerEdgeFunction(params: {
   school_code: string;
   full_name: string;
   pin: string;
   prompt: string;
-}): Promise<{
-  url?: string;
-  file_path?: string;
-  used?: number;
-  limit?: number;
-  remaining?: number;
-  error?: string;
-  status?: number;
-}> {
-  const edgeUrl = `${SUPABASE_URL}/functions/v1/ai-designer`;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
-
-  try {
-    const res = await fetch(edgeUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'apikey': SUPABASE_ANON_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(params),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      if (res.status === 404) {
-        console.warn('ai-designer Edge Function not deployed yet (404). Falling back to direct Supabase storage generation.');
-        return await generateAiFallbackImage(params);
-      }
-      return {
-        error: data.error || data.message || `Server error (${res.status})`,
-        status: res.status
-      };
-    }
-
-    return {
-      url: data.url,
-      file_path: data.file_path,
-      used: data.used,
-      limit: data.limit,
-      remaining: data.remaining,
-      status: 200
-    };
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      return { error: 'Network is slow. Try again.', status: 408 };
-    }
-    // If connection completely failed or DNS error, fallback gracefully
-    console.warn('ai-designer fetch error, testing fallback generator:', err);
-    try {
-      return await generateAiFallbackImage(params);
-    } catch {
-      return { error: err.message || 'Connection error. Try again.', status: 500 };
-    }
-  }
-}
-
-/**
- * Fallback generator when Edge Function is not yet deployed on Supabase project (404).
- * Enforces vidhub_ai_settings enabled flag & daily limit, creates image, uploads to vidhub_ai,
- * logs to vidhub_ai_images, and generates 1-hour signed URL.
- */
-export async function generateAiFallbackImage(params: {
-  school_code: string;
-  full_name: string;
-  pin: string;
-  prompt: string;
+  brief?: string;
 }): Promise<{
   url?: string;
   file_path?: string;
@@ -704,15 +638,13 @@ export async function generateAiFallbackImage(params: {
   status?: number;
 }> {
   try {
-    // 1. Check AI Settings (vidhub_ai_settings id=1)
+    // 1. Check AI Settings & Daily Quota
     const settings = await fetchAiSettings();
     if (!settings.enabled) {
       return { error: 'AI Create is currently disabled by administrator.', status: 403 };
     }
 
-    const limit = settings.daily_limit || 5;
-
-    // 2. Check today count
+    const limit = settings.daily_limit || 15;
     const todayStr = new Date().toISOString().slice(0, 10);
     const { data: existingToday } = await supabase
       .from('vidhub_ai_images')
@@ -727,178 +659,79 @@ export async function generateAiFallbackImage(params: {
       return { error: `Daily limit reached (${limit} pictures per student per day). Try again tomorrow!`, status: 429 };
     }
 
-    // 3. Create SVG visualization based on user prompt
-    const pLower = params.prompt.toLowerCase();
-    let themeColor1 = '#6366f1';
-    let themeColor2 = '#9333ea';
-    let iconSvg = '';
-    let category = 'Product Visual';
+    // 2. Call backend route /api/generate-ai-image (runs Google GenAI model or AI synthesis)
+    const res = await fetch('/api/generate-ai-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: params.prompt,
+        school_code: params.school_code,
+        student_name: params.full_name,
+        brief: params.brief
+      })
+    });
 
-    if (pLower.includes('sneaker') || pLower.includes('shoe') || pLower.includes('kicks') || pLower.includes('streetwear') || pLower.includes('fashion')) {
-      themeColor1 = '#f43f5e';
-      themeColor2 = '#8b5cf6';
-      category = 'Streetwear & Kicks';
-      iconSvg = `
-        <ellipse cx="400" cy="520" rx="260" ry="24" fill="#000000" opacity="0.6"/>
-        <path d="M220 480 C260 480 300 450 360 430 C410 410 460 360 520 320 C540 305 570 315 580 335 L620 410 C630 430 625 455 605 470 C570 495 510 500 240 500 Z" fill="#ffffff" stroke="#f43f5e" stroke-width="8"/>
-        <path d="M230 490 L610 490 L600 520 L240 520 Z" fill="#8b5cf6"/>
-        <path d="M340 435 C380 410 420 395 480 390" stroke="#f43f5e" stroke-width="6" fill="none" stroke-linecap="round"/>
-        <circle cx="530" cy="360" r="12" fill="#ec4899"/>
-        <path d="M260 440 L310 440" stroke="#8b5cf6" stroke-width="6" stroke-linecap="round"/>
-      `;
-    } else if (pLower.includes('gym') || pLower.includes('fitness') || pLower.includes('workout') || pLower.includes('muscle')) {
-      themeColor1 = '#06b6d4';
-      themeColor2 = '#3b82f6';
-      category = 'Fitness & Energy';
-      iconSvg = `
-        <rect x="180" y="380" width="440" height="40" rx="20" fill="#94a3b8"/>
-        <rect x="220" y="330" width="50" height="140" rx="16" fill="#38bdf8" stroke="#0284c7" stroke-width="6"/>
-        <rect x="280" y="350" width="35" height="100" rx="12" fill="#0ea5e9"/>
-        <rect x="530" y="330" width="50" height="140" rx="16" fill="#38bdf8" stroke="#0284c7" stroke-width="6"/>
-        <rect x="485" y="350" width="35" height="100" rx="12" fill="#0ea5e9"/>
-        <circle cx="400" cy="240" r="60" fill="#0284c7" opacity="0.2"/>
-        <polygon points="400,200 420,240 380,240" fill="#38bdf8"/>
-      `;
-    } else if (pLower.includes('coffee') || pLower.includes('cafe') || pLower.includes('cup') || pLower.includes('latte')) {
-      themeColor1 = '#d97706';
-      themeColor2 = '#78350f';
-      category = 'Coffee & Cafe';
-      iconSvg = `
-        <ellipse cx="400" cy="530" rx="220" ry="24" fill="#000000" opacity="0.5"/>
-        <ellipse cx="400" cy="510" rx="190" ry="18" fill="#fde68a" stroke="#d97706" stroke-width="6"/>
-        <path d="M280 340 L520 340 L490 480 C490 500 460 510 400 510 C340 510 310 500 310 480 Z" fill="#ffffff" stroke="#d97706" stroke-width="8"/>
-        <path d="M510 370 C560 370 570 440 500 450" fill="none" stroke="#d97706" stroke-width="12" stroke-linecap="round"/>
-        <path d="M350 300 Q360 250 340 210" stroke="#fbbf24" stroke-width="6" fill="none" stroke-linecap="round"/>
-        <path d="M400 290 Q410 240 390 200" stroke="#fbbf24" stroke-width="6" fill="none" stroke-linecap="round"/>
-        <path d="M450 300 Q460 250 440 210" stroke="#fbbf24" stroke-width="6" fill="none" stroke-linecap="round"/>
-      `;
-    } else if (pLower.includes('armchair') || pLower.includes('chair') || pLower.includes('living room') || pLower.includes('furniture')) {
-      themeColor1 = '#d97706';
-      themeColor2 = '#b45309';
-      category = 'Interior & Furniture';
-      iconSvg = `
-        <rect x="220" y="320" width="360" height="200" rx="36" fill="#fef3c7" stroke="#fbbf24" stroke-width="8"/>
-        <rect x="180" y="340" width="80" height="180" rx="24" fill="#fde68a"/>
-        <rect x="540" y="340" width="80" height="180" rx="24" fill="#fde68a"/>
-        <rect x="250" y="220" width="300" height="160" rx="30" fill="#fef3c7"/>
-        <line x1="240" y1="520" x2="220" y2="600" stroke="#78350f" stroke-width="14" stroke-linecap="round"/>
-        <line x1="560" y1="520" x2="580" y2="600" stroke="#78350f" stroke-width="14" stroke-linecap="round"/>
-        <circle cx="400" cy="180" r="40" fill="#fde047" opacity="0.3"/>
-      `;
-    } else if (pLower.includes('poster') || pLower.includes('sale') || pLower.includes('discount')) {
-      themeColor1 = '#dc2626';
-      themeColor2 = '#ea580c';
-      category = 'Commercial Poster';
-      iconSvg = `
-        <rect x="220" y="180" width="360" height="440" rx="20" fill="#ffffff" stroke="#fca5a5" stroke-width="6"/>
-        <rect x="250" y="210" width="300" height="200" rx="12" fill="#fee2e2"/>
-        <text x="400" y="330" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="900" fill="#dc2626" text-anchor="middle">SALE</text>
-        <rect x="260" y="440" width="280" height="20" rx="6" fill="#f87171"/>
-        <rect x="260" y="480" width="200" height="16" rx="4" fill="#fca5a5"/>
-        <circle cx="500" cy="230" r="32" fill="#ef4444"/>
-        <text x="500" y="238" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">50%</text>
-      `;
-    } else if (pLower.includes('shop') || pLower.includes('store') || pLower.includes('bakery') || pLower.includes('bread')) {
-      themeColor1 = '#059669';
-      themeColor2 = '#0d9488';
-      category = 'Storefront & Retail';
-      iconSvg = `
-        <path d="M180 280 L620 280 L590 180 L210 180 Z" fill="#34d399"/>
-        <path d="M180 280 Q235 340 290 280 Q345 340 400 280 Q455 340 510 280 Q565 340 620 280 L620 270 L180 270 Z" fill="#10b981"/>
-        <rect x="210" y="280" width="380" height="300" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="6"/>
-        <rect x="250" y="340" width="120" height="140" rx="8" fill="#a7f3d0"/>
-        <rect x="430" y="340" width="120" height="240" rx="8" fill="#047857"/>
-        <circle cx="525" cy="460" r="6" fill="#fef08a"/>
-      `;
-    } else {
-      category = 'Creative Visual';
-      iconSvg = `
-        <circle cx="400" cy="380" r="160" fill="#ede9fe" stroke="#c4b5fd" stroke-width="6"/>
-        <rect x="300" y="300" width="200" height="160" rx="20" fill="#8b5cf6" opacity="0.85"/>
-        <polygon points="400,240 440,300 360,300" fill="#a78bfa"/>
-        <circle cx="400" cy="380" r="40" fill="#ffffff"/>
-        <path d="M260 560 L540 560" stroke="#ddd6fe" stroke-width="8" stroke-linecap="round"/>
-      `;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success || !data.dataUrl) {
+      return {
+        error: data.error || `Image generation failed (${res.status})`,
+        status: res.status || 500
+      };
     }
 
-    const cleanPrompt = params.prompt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
-        <defs>
-          <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#0f172a"/>
-            <stop offset="50%" stop-color="#1e1b4b"/>
-            <stop offset="100%" stop-color="#090d16"/>
-          </linearGradient>
-          <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="${themeColor1}"/>
-            <stop offset="100%" stop-color="${themeColor2}"/>
-          </linearGradient>
-          <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="40" result="blur"/>
-            <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-          </filter>
-        </defs>
-        <rect width="800" height="800" fill="url(#bgGrad)"/>
-        <circle cx="400" cy="380" r="260" fill="${themeColor1}" opacity="0.18" filter="url(#softGlow)"/>
+    const mimeType = data.mimeType || 'image/jpeg';
+    const ext = mimeType.includes('png') ? 'png' : 'jpg';
 
-        <!-- Top Badge -->
-        <rect x="50" y="45" width="240" height="34" rx="17" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
-        <circle cx="68" cy="62" r="6" fill="#a855f7"/>
-        <text x="84" y="67" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#cbd5e1" letter-spacing="1">VIDHUB AI STUDIO</text>
+    // 3. Convert image to binary Blob
+    let imageBlob: Blob;
+    try {
+      const blobRes = await fetch(data.dataUrl);
+      imageBlob = await blobRes.blob();
+    } catch {
+      const binaryStr = atob(data.imageBase64);
+      const len = binaryStr.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      imageBlob = new Blob([bytes], { type: mimeType });
+    }
 
-        <!-- Category Tag -->
-        <rect x="540" y="45" width="210" height="34" rx="17" fill="url(#brandGrad)"/>
-        <text x="645" y="67" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">${category}</text>
-
-        <!-- Main Graphic -->
-        ${iconSvg}
-
-        <!-- Bottom Prompt Card -->
-        <rect x="40" y="650" width="720" height="110" rx="20" fill="#020617" stroke="#334155" stroke-width="1.5"/>
-        <text x="70" y="685" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="1">CREATIVE PROMPT</text>
-        <text x="70" y="722" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-style="italic" font-weight="600" fill="#f8fafc">"${cleanPrompt.length > 70 ? cleanPrompt.slice(0, 67) + '...' : cleanPrompt}"</text>
-        <text x="700" y="722" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#a855f7" text-anchor="end">${params.full_name} • VidHub</text>
-      </svg>
-    `;
-
-    // 4. Upload to vidhub_ai storage bucket
-    const fileName = `${params.school_code}_${Date.now()}_ai.svg`;
+    // 4. Upload real image to Supabase storage bucket vidhub_ai
+    const fileName = `${params.school_code}_${Date.now()}_gemini.${ext}`;
     const storagePath = `generated/${fileName}`;
-    const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
+    let finalUrl = data.dataUrl;
 
     const { error: uploadError } = await supabase.storage
       .from('vidhub_ai')
-      .upload(storagePath, svgBlob, { contentType: 'image/svg+xml', upsert: true });
+      .upload(storagePath, imageBlob, { contentType: mimeType, upsert: true });
 
-    if (uploadError) {
-      console.error('Storage upload error in fallback:', uploadError);
-      return { error: 'Could not store generated picture: ' + uploadError.message, status: 500 };
+    if (!uploadError) {
+      const { data: signData } = await supabase.storage
+        .from('vidhub_ai')
+        .createSignedUrl(storagePath, 3600);
+
+      if (signData?.signedUrl) {
+        finalUrl = signData.signedUrl;
+      }
+
+      // Record in history table
+      await supabase.from('vidhub_ai_images').insert({
+        school_code: params.school_code,
+        student_name: params.full_name,
+        prompt: params.prompt,
+        file_path: storagePath,
+        status: 'ok',
+        note: `Generated by ${data.modelUsed || 'Gemini AI'}`,
+        flagged: false
+      });
+    } else {
+      console.warn('Storage upload error, using direct dataUrl:', uploadError);
     }
-
-    // 5. Create 1-hour signed URL
-    const { data: signData, error: signError } = await supabase.storage
-      .from('vidhub_ai')
-      .createSignedUrl(storagePath, 3600);
-
-    if (signError || !signData?.signedUrl) {
-      return { error: 'Could not generate picture URL.', status: 500 };
-    }
-
-    // 6. Record in vidhub_ai_images
-    await supabase.from('vidhub_ai_images').insert({
-      school_code: params.school_code,
-      student_name: params.full_name,
-      prompt: params.prompt,
-      file_path: storagePath,
-      status: 'ok',
-      note: 'Preview graphic (Edge Function fallback)',
-      flagged: false
-    });
 
     const newUsed = usedCount + 1;
     return {
-      url: signData.signedUrl,
+      url: finalUrl,
       file_path: storagePath,
       used: newUsed,
       limit: limit,
@@ -906,10 +739,12 @@ export async function generateAiFallbackImage(params: {
       status: 200
     };
   } catch (err: any) {
-    console.error('generateAiFallbackImage error:', err);
-    return { error: err.message || 'Image generation failed', status: 500 };
+    console.error('callAiDesignerEdgeFunction error:', err);
+    return { error: err.message || 'Image generation failed. Please try again.', status: 500 };
   }
 }
+
+export const generateAiFallbackImage = callAiDesignerEdgeFunction;
 
 /**
  * Send image to Clip Bank / Submissions
