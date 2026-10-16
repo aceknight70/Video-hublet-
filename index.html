@@ -892,33 +892,71 @@
                 </div>
               </div>
 
-              <!-- Tap to choose zoom target -->
-              <div class="p-3 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2">
-                <div class="flex justify-between items-center">
-                  <span class="text-xs font-semibold text-zinc-300">Tap target on photo:</span>
-                  <div class="flex items-center gap-3 text-xs text-zinc-400">
-                    <label class="flex items-center gap-1 cursor-pointer">
-                      <input type="radio" name="sc-m" value="start" checked class="accent-amber-400">
-                      <span>Zoom target (Gold)</span>
-                    </label>
-                    <label class="flex items-center gap-1 cursor-pointer">
-                      <input type="radio" name="sc-m" value="end" class="accent-emerald-400">
-                      <span>Pan to (Green)</span>
-                    </label>
+              <!-- Shade Zoom & Pan Target Areas on Photo -->
+              <div class="p-3 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2.5">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span class="text-xs font-semibold text-zinc-300">Shade Area on Photo:</span>
+                  <div class="flex items-center gap-1.5">
+                    <button type="button" id="sc-btn-mode-start" class="sc-mode-btn py-1 px-2.5 rounded-lg text-xs font-bold border transition-all cursor-pointer bg-amber-500 text-black border-amber-400 shadow-md flex items-center gap-1.5" title="Click to shade the primary zoom target area">
+                      <span class="w-2.5 h-2.5 rounded-full bg-black"></span>
+                      <span>🟡 Zoom Area</span>
+                    </button>
+                    <button type="button" id="sc-btn-mode-end" class="sc-mode-btn py-1 px-2.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer bg-zinc-900 text-emerald-400 border-zinc-800 hover:border-emerald-500/50 flex items-center gap-1.5" title="Click to shade the secondary pan destination area">
+                      <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                      <span>🟢 Pan Area</span>
+                    </button>
+                    <input type="radio" name="sc-m" value="start" checked class="sr-only">
+                    <input type="radio" name="sc-m" value="end" class="sr-only">
                   </div>
                 </div>
 
+                <!-- Helper Shading Guidance Hint -->
+                <div id="sc-shade-hint" class="text-[11px] text-amber-300 text-center font-medium bg-amber-500/10 border border-amber-500/20 py-1.5 px-3 rounded-lg leading-tight transition-colors">
+                  ✨ Drag across photo to shade zoom area • Small area = deep zoom
+                </div>
+
+                <!-- Interactive Photo Stage with Shaded Overlays -->
                 <div class="flex justify-center">
-                  <div id="sc-pk" class="relative w-full max-w-[240px] aspect-[4/3] rounded-lg overflow-hidden border border-zinc-700 bg-black cursor-crosshair touch-none select-none">
+                  <div id="sc-pk" class="relative w-full max-w-[280px] max-h-[280px] aspect-[4/3] rounded-xl overflow-hidden border border-zinc-700 bg-black cursor-crosshair touch-none select-none shadow-inner">
                     <img alt="" class="w-full h-full object-contain pointer-events-none">
-                    <i class="d1 absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 border-white bg-amber-400 pointer-events-none shadow-md"></i>
-                    <i class="d2 absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 border-white bg-emerald-400 pointer-events-none shadow-md hidden"></i>
+                    
+                    <!-- SVG Path Line connecting Zoom box to Pan box -->
+                    <svg id="sc-pk-svg" class="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible hidden"></svg>
+
+                    <!-- Gold Shaded Zoom Area Box -->
+                    <div id="sc-box-zoom" class="absolute pointer-events-none border-2 border-amber-400 bg-amber-400/35 rounded-lg shadow-lg flex items-center justify-center transition-all duration-75 z-20">
+                      <i class="d1 w-3.5 h-3.5 rounded-full border-2 border-white bg-amber-400 shadow-md"></i>
+                      <span id="sc-badge-zoom" class="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-amber-500 text-black text-[9px] font-black rounded font-mono shadow whitespace-nowrap pointer-events-none">
+                        Zoom 2.5×
+                      </span>
+                    </div>
+
+                    <!-- Green Shaded Pan Area Box -->
+                    <div id="sc-box-pan" class="absolute pointer-events-none border-2 border-emerald-400 bg-emerald-400/35 rounded-lg shadow-lg flex items-center justify-center transition-all duration-75 z-20 hidden">
+                      <i class="d2 w-3.5 h-3.5 rounded-full border-2 border-white bg-emerald-400 shadow-md"></i>
+                      <span id="sc-badge-pan" class="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-emerald-500 text-black text-[9px] font-black rounded font-mono shadow whitespace-nowrap pointer-events-none">
+                        Pan 1.2×
+                      </span>
+                    </div>
+
+                    <!-- Real-Time Shading Drag Box -->
+                    <div id="sc-box-drag" class="absolute pointer-events-none border-2 border-dashed rounded-lg z-30 hidden">
+                      <span id="sc-badge-drag" class="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-[9px] font-black rounded font-mono shadow whitespace-nowrap pointer-events-none">
+                        Shading...
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <label class="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer pt-1">
-                  <input type="checkbox" data-sc="s" data-k="pan" class="accent-amber-400">
-                  <span>Pan from target to second point</span>
-                </label>
+
+                <div class="flex items-center justify-between text-xs text-zinc-400 pt-0.5">
+                  <label class="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                    <input type="checkbox" data-sc="s" data-k="pan" class="accent-amber-400">
+                    <span>Pan from Zoom area to Pan area</span>
+                  </label>
+                  <button type="button" id="sc-btn-center-zoom" class="text-[10px] text-zinc-400 hover:text-amber-300 transition-colors underline cursor-pointer" title="Center zoom on photo">
+                    Reset Center
+                  </button>
+                </div>
               </div>
 
               <!-- Motion Sliders -->

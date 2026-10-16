@@ -383,25 +383,101 @@ export function sync() {
   const s = S[sel];
   const pk = document.getElementById('sc-pk');
   if (pk) {
-    const img = pk.querySelector('img');
+    const img = pk.querySelector('img') as HTMLImageElement | null;
+    const boxZoom = document.getElementById('sc-box-zoom');
+    const badgeZoom = document.getElementById('sc-badge-zoom');
+    const boxPan = document.getElementById('sc-box-pan');
+    const badgePan = document.getElementById('sc-badge-pan');
+    const svg = document.getElementById('sc-pk-svg');
+
     if (s && img) {
       img.src = s.url;
-      const d1 = pk.querySelector('.d1') as HTMLElement | null;
-      const d2 = pk.querySelector('.d2') as HTMLElement | null;
-      if (d1) {
-        d1.style.left = s.fx * 100 + '%';
-        d1.style.top = s.fy * 100 + '%';
+      const imgW = s.img.naturalWidth || img.naturalWidth || 1;
+      const imgH = s.img.naturalHeight || img.naturalHeight || 1;
+      if (imgW && imgH) {
+        pk.style.aspectRatio = `${imgW} / ${imgH}`;
       }
-      if (d2) {
-        d2.classList.toggle('hidden', !s.pan);
-        d2.style.left = s.fx2 * 100 + '%';
-        d2.style.top = s.fy2 * 100 + '%';
+
+      const s0 = Math.max(W / imgW, H / imgH);
+      const zMaxVal = Math.max(0.5, s.zmax);
+      const boxW = clamp((W / (s0 * zMaxVal)) / imgW, 0.06, 1);
+      const boxH = clamp((H / (s0 * zMaxVal)) / imgH, 0.06, 1);
+      const left = clamp(s.fx - boxW / 2, 0, 1 - boxW);
+      const top = clamp(s.fy - boxH / 2, 0, 1 - boxH);
+
+      if (boxZoom) {
+        boxZoom.style.left = (left * 100).toFixed(2) + '%';
+        boxZoom.style.top = (top * 100).toFixed(2) + '%';
+        boxZoom.style.width = (boxW * 100).toFixed(2) + '%';
+        boxZoom.style.height = (boxH * 100).toFixed(2) + '%';
+        if (badgeZoom) badgeZoom.textContent = `Zoom ${s.zmax.toFixed(1)}×`;
+      }
+
+      if (boxPan) {
+        boxPan.classList.toggle('hidden', !s.pan);
+        if (s.pan) {
+          const zEndVal = Math.max(0.5, s.ze || 1);
+          const panW = clamp((W / (s0 * zEndVal)) / imgW, 0.06, 1);
+          const panH = clamp((H / (s0 * zEndVal)) / imgH, 0.06, 1);
+          const panLeft = clamp(s.fx2 - panW / 2, 0, 1 - panW);
+          const panTop = clamp(s.fy2 - panH / 2, 0, 1 - panH);
+          boxPan.style.left = (panLeft * 100).toFixed(2) + '%';
+          boxPan.style.top = (panTop * 100).toFixed(2) + '%';
+          boxPan.style.width = (panW * 100).toFixed(2) + '%';
+          boxPan.style.height = (panH * 100).toFixed(2) + '%';
+          if (badgePan) badgePan.textContent = `Pan ${zEndVal.toFixed(1)}×`;
+        }
+      }
+
+      if (svg) {
+        if (s.pan) {
+          const x1 = (s.fx * 100).toFixed(1) + '%';
+          const y1 = (s.fy * 100).toFixed(1) + '%';
+          const x2 = (s.fx2 * 100).toFixed(1) + '%';
+          const y2 = (s.fy2 * 100).toFixed(1) + '%';
+          svg.innerHTML = `
+            <defs>
+              <marker id="sc-arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 8 5 L 0 9 z" fill="#34d399" />
+              </marker>
+            </defs>
+            <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#34d399" stroke-width="2.5" stroke-dasharray="4 3" marker-end="url(#sc-arrow)" />
+          `;
+          svg.classList.remove('hidden');
+        } else {
+          svg.innerHTML = '';
+          svg.classList.add('hidden');
+        }
       }
     } else if (img) {
       img.src = '';
     }
+
     const parent = pk.parentElement;
     if (parent) parent.style.opacity = s ? '1' : '0.4';
+  }
+
+  // Update Mode Buttons & Hint Banner
+  const btnStart = document.getElementById('sc-btn-mode-start');
+  const btnEnd = document.getElementById('sc-btn-mode-end');
+  const hintEl = document.getElementById('sc-shade-hint');
+  if (btnStart && btnEnd) {
+    const isStart = mode === 'start';
+    btnStart.className = `sc-mode-btn py-1 px-2.5 rounded-lg text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+      isStart ? 'bg-amber-500 text-black border-amber-400 shadow-md font-bold' : 'bg-zinc-900 text-amber-400 border-zinc-800 hover:border-amber-500/50'
+    }`;
+    btnEnd.className = `sc-mode-btn py-1 px-2.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 ${
+      !isStart ? 'bg-emerald-500 text-black border-emerald-400 shadow-md font-bold' : 'bg-zinc-900 text-emerald-400 border-zinc-800 hover:border-emerald-500/50'
+    }`;
+    if (hintEl) {
+      if (isStart) {
+        hintEl.textContent = '✨ Drag across photo to shade zoom area • Small area = deep zoom';
+        hintEl.className = 'text-[11px] text-amber-300 text-center font-medium bg-amber-500/10 border border-amber-500/20 py-1.5 px-3 rounded-lg leading-tight transition-colors';
+      } else {
+        hintEl.textContent = '✨ Drag across photo to shade pan destination • Small area = deep zoom';
+        hintEl.className = 'text-[11px] text-emerald-300 text-center font-medium bg-emerald-500/10 border border-emerald-500/20 py-1.5 px-3 rounded-lg leading-tight transition-colors';
+      }
+    }
   }
 }
 
@@ -595,38 +671,197 @@ export function initPhotoShowcase(options?: {
     }
   });
 
-  // Tap-the-Photo Crosshair Target Picker
+  // Shade Area Drag & Tap Picker on Photo
   const pk = document.getElementById('sc-pk');
+  const boxDrag = document.getElementById('sc-box-drag');
+  const badgeDrag = document.getElementById('sc-badge-drag');
+
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  let currentX = 0;
+  let currentY = 0;
+
+  function updateDragBox(minX: number, minY: number, maxX: number, maxY: number) {
+    if (!boxDrag || !badgeDrag) return;
+    const w = maxX - minX;
+    const h = maxY - minY;
+    boxDrag.style.left = (minX * 100).toFixed(2) + '%';
+    boxDrag.style.top = (minY * 100).toFixed(2) + '%';
+    boxDrag.style.width = (w * 100).toFixed(2) + '%';
+    boxDrag.style.height = (h * 100).toFixed(2) + '%';
+
+    const isStart = mode === 'start';
+    boxDrag.className = `absolute pointer-events-none border-2 border-dashed rounded-lg z-30 ${
+      isStart ? 'border-amber-400 bg-amber-400/40' : 'border-emerald-400 bg-emerald-400/40'
+    }`;
+    badgeDrag.className = `absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-[9px] font-black rounded font-mono shadow whitespace-nowrap pointer-events-none ${
+      isStart ? 'bg-amber-500 text-black' : 'bg-emerald-500 text-black'
+    }`;
+
+    const maxDim = Math.max(w, h);
+    if (maxDim > 0.04) {
+      const liveZoom = clamp(+(1 / Math.max(0.125, maxDim)).toFixed(1), 1.0, 8.0);
+      badgeDrag.textContent = isStart ? `Zoom ${liveZoom}×` : `Pan ${liveZoom}×`;
+    } else {
+      badgeDrag.textContent = isStart ? 'Shading Zoom...' : 'Shading Pan...';
+    }
+    boxDrag.classList.remove('hidden');
+  }
+
   if (pk) {
-    pk.addEventListener('pointerdown', e => {
+    pk.addEventListener('pointerdown', (e: PointerEvent) => {
       const s = S[sel];
       if (!s) return;
-      const r = pk.getBoundingClientRect();
-      const x = clamp((e.clientX - r.left) / r.width, 0, 1);
-      const y = clamp((e.clientY - r.top) / r.height, 0, 1);
+      isDragging = true;
+      try {
+        pk.setPointerCapture(e.pointerId);
+      } catch (_) {}
 
-      if (mode === 'end') {
-        s.pan = true;
-        s.fx2 = x;
-        s.fy2 = y;
+      const r = pk.getBoundingClientRect();
+      startX = clamp((e.clientX - r.left) / r.width, 0, 1);
+      startY = clamp((e.clientY - r.top) / r.height, 0, 1);
+      currentX = startX;
+      currentY = startY;
+
+      updateDragBox(startX, startY, startX, startY);
+    });
+
+    pk.addEventListener('pointermove', (e: PointerEvent) => {
+      if (!isDragging) return;
+      const r = pk.getBoundingClientRect();
+      currentX = clamp((e.clientX - r.left) / r.width, 0, 1);
+      currentY = clamp((e.clientY - r.top) / r.height, 0, 1);
+
+      const minX = Math.min(startX, currentX);
+      const maxX = Math.max(startX, currentX);
+      const minY = Math.min(startY, currentY);
+      const maxY = Math.max(startY, currentY);
+
+      updateDragBox(minX, minY, maxX, maxY);
+    });
+
+    const handlePointerEnd = (e: PointerEvent) => {
+      if (!isDragging) return;
+      isDragging = false;
+      try {
+        pk.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+
+      boxDrag?.classList.add('hidden');
+      const s = S[sel];
+      if (!s) return;
+
+      const minX = Math.min(startX, currentX);
+      const maxX = Math.max(startX, currentX);
+      const minY = Math.min(startY, currentY);
+      const maxY = Math.max(startY, currentY);
+      const w = maxX - minX;
+      const h = maxY - minY;
+      const dragDim = Math.max(w, h);
+
+      if (dragDim > 0.05) {
+        // Dragged an area -> compute center and zoom level!
+        const cx = clamp(minX + w / 2, 0, 1);
+        const cy = clamp(minY + h / 2, 0, 1);
+        const computedZoom = clamp(+(1 / Math.max(0.125, dragDim)).toFixed(1), 1.0, 8.0);
+
+        if (mode === 'end') {
+          s.pan = true;
+          s.fx2 = cx;
+          s.fy2 = cy;
+          s.ze = computedZoom;
+          const zeSlider = modal?.querySelector('input[data-k="ze"]') as HTMLInputElement | null;
+          if (zeSlider) {
+            zeSlider.value = String(s.ze);
+            const out = zeSlider.parentElement?.querySelector('output');
+            if (out) out.textContent = String(s.ze);
+          }
+          const panCheck = modal?.querySelector('input[data-k="pan"]') as HTMLInputElement | null;
+          if (panCheck) panCheck.checked = true;
+        } else {
+          s.fx = cx;
+          s.fy = cy;
+          s.zmax = computedZoom;
+          if (!s.pan) {
+            s.fx2 = cx;
+            s.fy2 = cy;
+          }
+          const zmaxSlider = modal?.querySelector('input[data-k="zmax"]') as HTMLInputElement | null;
+          if (zmaxSlider) {
+            zmaxSlider.value = String(s.zmax);
+            const out = zmaxSlider.parentElement?.querySelector('output');
+            if (out) out.textContent = String(s.zmax);
+          }
+        }
       } else {
-        s.fx = x;
-        s.fy = y;
-        if (!s.pan) {
-          s.fx2 = x;
-          s.fy2 = y;
+        // Tapped a single point -> Center shaded box without changing zoom
+        if (mode === 'end') {
+          s.pan = true;
+          s.fx2 = currentX;
+          s.fy2 = currentY;
+          const panCheck = modal?.querySelector('input[data-k="pan"]') as HTMLInputElement | null;
+          if (panCheck) panCheck.checked = true;
+        } else {
+          s.fx = currentX;
+          s.fy = currentY;
+          if (!s.pan) {
+            s.fx2 = currentX;
+            s.fy2 = currentY;
+          }
         }
       }
+
       sync();
       goSel();
-    });
+    };
+
+    pk.addEventListener('pointerup', handlePointerEnd);
+    pk.addEventListener('pointercancel', handlePointerEnd);
   }
+
+  // Yellow and Green Target Mode Buttons
+  document.getElementById('sc-btn-mode-start')?.addEventListener('click', () => {
+    mode = 'start';
+    const radio = modal?.querySelector('input[name="sc-m"][value="start"]') as HTMLInputElement | null;
+    if (radio) radio.checked = true;
+    sync();
+  });
+
+  document.getElementById('sc-btn-mode-end')?.addEventListener('click', () => {
+    mode = 'end';
+    const s = S[sel];
+    if (s) {
+      s.pan = true;
+      const panCheck = modal?.querySelector('input[data-k="pan"]') as HTMLInputElement | null;
+      if (panCheck) panCheck.checked = true;
+    }
+    const radio = modal?.querySelector('input[name="sc-m"][value="end"]') as HTMLInputElement | null;
+    if (radio) radio.checked = true;
+    sync();
+  });
+
+  // Center Reset Button
+  document.getElementById('sc-btn-center-zoom')?.addEventListener('click', () => {
+    const s = S[sel];
+    if (!s) return;
+    if (mode === 'end') {
+      s.fx2 = 0.5;
+      s.fy2 = 0.5;
+    } else {
+      s.fx = 0.5;
+      s.fy = 0.5;
+    }
+    sync();
+    goSel();
+  });
 
   // Radio button for Target mode
   modal?.addEventListener('change', e => {
     const target = e.target as HTMLInputElement;
     if (target.name === 'sc-m') {
       mode = target.value;
+      sync();
     }
   });
 
